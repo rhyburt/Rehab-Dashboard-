@@ -229,8 +229,8 @@
     REGIONS.forEach((r) => { regions[r] = newRegion(r); });
     return {
       id: uid("p"), schema: 1, created: now, updated: now,
-      profile: { name: "", position: "", injury: "", side: "", injuryDate: "", rtpDate: "", dob: "", height: null, mass: null,
-        matOffset: null, pah: null, measuredOn: "" },
+      profile: { name: "", position: "", injury: "", side: "", injuryDate: "", rtpDate: "", dob: "" },
+      growth: [],
       settings: { ticks: {}, lsiTarget: 0.9, chartRegion: "", chartSlot: {} },
       statusLog: [],
       regions,
@@ -248,6 +248,11 @@
     ADDONS.forEach((a) => { addons[a.key] = !!(prev && prev.addons && prev.addons[a.key]); });
     return { id: uid("s"), date: date || "", avail: prev ? prev.avail : "", focus: prev ? prev.focus : "", addons, notes: "" };
   }
+  // Athlete profile log: one row per measurement day. % PAH = height ÷ predicted adult height.
+  function newGrowthRow(date, prev) {
+    return { id: uid("h"), date: date || "", height: null, sitting: null, mass: null,
+      predicted: prev && isNum(prev.predicted) ? prev.predicted : null, matOffset: null, notes: "" };
+  }
   function newSession(date) {
     return { id: uid("g"), date: date || "", type: "", td: null, hsr: null, sd: null, acc: null, dec: null, top: null, notes: "" };
   }
@@ -260,6 +265,23 @@
     p.created = raw.created || p.created;
     p.updated = raw.updated || p.updated;
     Object.keys(p.profile).forEach((k) => { if (raw.profile && raw.profile[k] !== undefined) p.profile[k] = raw.profile[k]; });
+    if (Array.isArray(raw.growth)) {
+      p.growth = raw.growth.map((g) => {
+        const row = newGrowthRow(g.date);
+        row.id = g.id || row.id;
+        row.notes = str(g.notes);
+        ["height", "sitting", "mass", "predicted", "matOffset"].forEach((k) => { row[k] = isNum(g[k]) ? g[k] : null; });
+        return row;
+      });
+    } else if (raw.profile && ["height", "mass", "matOffset", "pah"].some((k) => isNum(raw.profile[k]))) {
+      // older saves kept a single set of measurements on the profile — turn it into the first log entry
+      const pr = raw.profile, row = newGrowthRow(str(pr.measuredOn));
+      row.height = isNum(pr.height) ? pr.height : null;
+      row.mass = isNum(pr.mass) ? pr.mass : null;
+      row.matOffset = isNum(pr.matOffset) ? pr.matOffset : null;
+      if (isNum(pr.pah) && pr.pah > 0 && isNum(pr.height)) row.predicted = Math.round(pr.height / (pr.pah <= 1.5 ? pr.pah : pr.pah / 100) * 10) / 10;
+      p.growth = [row];
+    }
     if (raw.settings) {
       if (raw.settings.ticks) REGIONS.forEach((r) => { p.settings.ticks[r] = !!raw.settings.ticks[r]; });
       if (isNum(raw.settings.lsiTarget)) p.settings.lsiTarget = raw.settings.lsiTarget;
@@ -333,8 +355,10 @@
   function examplePlayer() {
     const p = newPlayer();
     Object.assign(p.profile, { name: "Example Player", position: "CM · U16", injury: "e.g. L ACL reconstruction", side: "L",
-      injuryDate: "2026-08-10", rtpDate: "2027-02-01", dob: "2011-03-14", height: 171.4, mass: 58.2, matOffset: 0.6,
-      pah: null, measuredOn: "2026-09-01" });
+      injuryDate: "2026-08-10", rtpDate: "2027-02-01", dob: "2011-03-14" });
+    const g = newGrowthRow("2026-09-01");
+    Object.assign(g, { height: 171.4, mass: 58.2, matOffset: 0.6, notes: "EXAMPLE ROW — overwrite / delete" });
+    p.growth.push(g);
     p.settings.ticks = { Hip: true, Knee: true };
     p.settings.chartRegion = "Knee";
     const NOTE = "EXAMPLE ROW — overwrite / delete";
@@ -583,8 +607,54 @@
     return "";
   }
 
+  // Growth log: per-row % PAH, maturity and growth rate, plus the latest value of each measure
+  function calcGrowth(player) {
+    const dob = dnum(player.profile.dob);
+    const rows = player.growth.map((g, i) => ({ g, i, d: dnum(g.date) }));
+    const dated = rows.filter((r) => r.d != null).sort((a, b) => a.d - b.d || a.i - b.i);
+    const byIndex = {};
+    rows.forEach((r) => {
+      const g = r.g;
+      const pctPah = isNum(g.height) && isNum(g.predicted) && g.predicted > 0 ? (g.height / g.predicted) * 100 : null;
+      byIndex[r.i] = { pctPah, maturity: maturity({ pah: pctPah, matOffset: g.matOffset }),
+        age: dob != null && r.d != null ? (r.d - dob) / 365.25 : null, rate: null };
+      if (isNum(g.height) && isNum(g.sitting)) byIndex[r.i].leg = g.height - g.sitting;
+    });
+    // growth rate (cm / year) against the previous dated height
+    let prev = null;
+    dated.forEach((r) => {
+      if (!isNum(r.g.height)) return;
+      if (prev && r.d - prev.d >= 14) byIndex[r.i].rate = (r.g.height - prev.g.height) / ((r.d - prev.d) / 365.25);
+      prev = r;
+    });
+    const latest = (pick) => {
+      for (let k = dated.length - 1; k >= 0; k--) { const v = pick(dated[k]); if (v != null) return { v, d: dated[k].d }; }
+      return null;
+    };
+    const L = {
+      height: latest((r) => (isNum(r.g.height) ? r.g.height : null)),
+      sitting: latest((r) => (isNum(r.g.sitting) ? r.g.sitting : null)),
+      mass: latest((r) => (isNum(r.g.mass) ? r.g.mass : null)),
+      predicted: latest((r) => (isNum(r.g.predicted) ? r.g.predicted : null)),
+      matOffset: latest((r) => (isNum(r.g.matOffset) ? r.g.matOffset : null)),
+      pctPah: latest((r) => byIndex[r.i].pctPah),
+      rate: latest((r) => byIndex[r.i].rate),
+    };
+    const v = (k) => (L[k] ? L[k].v : null);
+    return {
+      rows: byIndex, dated,
+      height: v("height"), sitting: v("sitting"), mass: v("mass"), predicted: v("predicted"), matOffset: v("matOffset"),
+      pctPah: v("pctPah"), rate: v("rate"),
+      measuredOn: dated.length ? dated[dated.length - 1].d : null,
+      maturity: maturity({ pah: v("pctPah"), matOffset: v("matOffset") }),
+      series: (k, f) => dated.filter((r) => byIndex[r.i].age != null && (f ? f(r) : r.g[k]) != null && isNum(f ? f(r) : r.g[k]))
+        .map((r) => [Math.round(byIndex[r.i].age * 100) / 100, f ? f(r) : r.g[k]]),
+    };
+  }
+
   function calcPlayer(player) {
     const pr = player.profile, today = todayNum();
+    const growth = calcGrowth(player);
     const inj = dnum(pr.injuryDate), dob = dnum(pr.dob), rtp = dnum(pr.rtpDate);
     const gps = calcGps(player);
     const regions = {};
@@ -599,7 +669,8 @@
       weeksToRtp: rtp == null ? null : Math.round(((rtp - today) / 7) * 10) / 10,
       age: dob == null ? null : (today - dob) / 365.25,
       ageAtInjury: dob == null || inj == null ? null : (inj - dob) / 365.25,
-      maturity: maturity(pr),
+      maturity: growth.maturity,
+      growth,
     };
   }
 
@@ -628,7 +699,7 @@
     regionTitle, blockTitle, isNum, isSpare, isGpsTest, isManual, uid,
     dnum, todayNum, todayIso, setToday, isoFromNum, fmtDate, weekOf,
     fmtInt, fmt1, fmtPct, fmtNum, fmtSigned,
-    newPlayer, newRegion, newBlockRow, newStatusRow, newSession, normalizePlayer, examplePlayer,
+    newPlayer, newRegion, newBlockRow, newStatusRow, newSession, newGrowthRow, calcGrowth, normalizePlayer, examplePlayer,
     lsi, calcBlock, calcGps, calcRegion, calcStatus, calcPlayer, headline, maturity, lsiSeries, slotSeries,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Calc;

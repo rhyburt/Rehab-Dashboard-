@@ -61,7 +61,7 @@
     if (h[0] === "p" && h[1]) return { page: "player", id: h[1], tab: h[2] || "dashboard" };
     return { page: "library" };
   }
-  const TABS = [["dashboard", "Dashboard"], ["status", "Status Log"]]
+  const TABS = [["dashboard", "Dashboard"], ["profile", "Athlete Profile"], ["status", "Status Log"]]
     .concat(C.REGIONS.map((r) => [slug(r), C.regionTitle(r)])).concat([["gps", "GPS"]]);
   function slug(region) { return region.toLowerCase(); }
   function regionFromTab(tab) { return C.REGIONS.find((r) => slug(r) === tab) || null; }
@@ -178,9 +178,17 @@
     if (!pts.length) return `<figure class="chart">${head}<div class="chart-empty">${esc(o.empty || "No data yet")}</div></figure>`;
     const W = 560, H = o.height || 250, m = { l: 50, r: 16, t: 14, b: 40 };
     const iw = W - m.l - m.r, ih = H - m.t - m.b;
-    const xMaxData = Math.max(1, ...pts.map((p) => p[0]));
-    const xStep = Math.max(1, Math.ceil(niceStep(xMaxData / 8)));
-    const xMax = Math.ceil((xMaxData + 0.5) / xStep) * xStep;
+    let xMin = 0, xMax, xStep;
+    if (o.xAuto) {
+      const lo = Math.min(...pts.map((p) => p[0])), hiX = Math.max(...pts.map((p) => p[0]));
+      xStep = niceStep(Math.max(hiX - lo, 0.5) / 6);
+      xMin = Math.floor((lo - xStep * 0.25) / xStep) * xStep;
+      xMax = Math.ceil((hiX + xStep * 0.25) / xStep) * xStep;
+    } else {
+      const xMaxData = Math.max(1, ...pts.map((p) => p[0]));
+      xStep = Math.max(1, Math.ceil(niceStep(xMaxData / 8)));
+      xMax = Math.ceil((xMaxData + 0.5) / xStep) * xStep;
+    }
     let lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1]));
     if (isNum(o.target)) { lo = Math.min(lo, o.target); hi = Math.max(hi, o.target); }
     if (o.zero) lo = Math.min(0, lo);
@@ -188,21 +196,21 @@
     if (hi === lo) hi = lo + (o.kind === "pct" ? 0.1 : 1);
     const yStep = niceStep((hi - lo) / 5);
     const y0 = Math.floor(lo / yStep) * yStep, y1 = Math.ceil(hi / yStep - 1e-9) * yStep + (o.kind === "pct" ? 0 : 0);
-    const X = (x) => m.l + (x / xMax) * iw;
+    const X = (x) => m.l + ((x - xMin) / (xMax - xMin)) * iw;
     const Y = (y) => m.t + ih - ((y - y0) / (y1 - y0)) * ih;
     let g = "";
     for (let v = y0; v <= y1 + yStep / 1e6; v += yStep) {
       const yy = Y(v).toFixed(1);
       g += `<line x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}" class="grid"/><text x="${m.l - 6}" y="${yy}" class="ytick">${esc(fmtAxis(v, o.kind))}</text>`;
     }
-    for (let v = 0; v <= xMax; v += xStep) {
-      g += `<text x="${X(v).toFixed(1)}" y="${m.t + ih + 16}" class="xtick">${v}</text>`;
+    for (let v = xMin; v <= xMax + xStep / 1e6; v += xStep) {
+      g += `<text x="${X(v).toFixed(1)}" y="${m.t + ih + 16}" class="xtick">${Math.round(v * 100) / 100}</text>`;
     }
     g += `<line x1="${m.l}" x2="${W - m.r}" y1="${m.t + ih}" y2="${m.t + ih}" class="axis"/>`;
     g += `<text x="${m.l + iw / 2}" y="${H - 4}" class="xtitle">${esc(o.xTitle || "Rehab week")}</text>`;
     if (isNum(o.target)) {
       const ty = Y(o.target).toFixed(1);
-      g += `<line x1="${m.l}" x2="${W - m.r}" y1="${ty}" y2="${ty}" class="target"/><text x="${m.l + 4}" y="${ty - 5}" class="tlabel">target ${esc(fmtAxis(o.target, o.kind))}</text>`;
+      g += `<line x1="${m.l}" x2="${W - m.r}" y1="${ty}" y2="${ty}" class="target"/><text x="${m.l + 4}" y="${ty - 5}" class="tlabel">${esc(o.targetLabel || "target " + fmtAxis(o.target, o.kind))}</text>`;
     }
     let marks = "", hits = "";
     series.forEach((s, si) => {
@@ -218,7 +226,7 @@
         if (p[1] == null) return;
         const x = X(p[0]), y = Y(p[1]);
         marks += markerSvg(shape, x, y, 4.5, color);
-        hits += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="11" class="hit" data-tip="${esc(`${s.name} · wk ${p[0]} · ${o.fmtTip ? o.fmtTip(p[1]) : fmtAxis(p[1], o.kind)}`)}"/>`;
+        hits += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="11" class="hit" data-tip="${esc(`${s.name} · ${o.xTip ? o.xTip(p[0]) : "wk " + p[0]} · ${o.fmtTip ? o.fmtTip(p[1]) : fmtAxis(p[1], o.kind)}`)}"/>`;
       });
     });
     const legend = series.length > 1 || o.legend ? `<div class="legend">${series.map((s, si) =>
@@ -234,9 +242,9 @@
     morphChildren(app, tpl.content);
   }
 
-  const BRAND = `<a class="brand" href="#/" aria-label="Rehab Dashboard home"><img class="crest-sm" src="icons/crest.png" alt="">` +
+  const BRAND = `<a class="brand" href="#/" aria-label="Rehab Dashboard home"><img class="mark" src="icons/icon-192.png" alt="">` +
     `<span class="brand-txt"><span class="brand-top">Leeds United Academy</span><span class="brand-main">Rehab<b>Dashboard</b></span></span></a>`;
-  const FOOT = `<footer class="foot"><img src="icons/crest.png" alt=""><span>Marching on Together</span><i></i><span>Leeds United Academy · Sports Medicine</span></footer>`;
+  const FOOT = `<footer class="foot"><span>Marching on Together</span><i></i><span>Leeds United Academy · Sports Medicine</span></footer>`;
 
   function renderShell() {
     if (route.page === "player" && player) {
@@ -270,6 +278,7 @@
     const tab = route.tab;
     const calc = C.calcPlayer(player);
     if (tab === "status") return renderStatusLog(calc);
+    if (tab === "profile") return renderAthlete(calc);
     if (tab === "gps") return renderGps(calc);
     const reg = regionFromTab(tab);
     if (reg) return renderRegion(reg, calc);
@@ -296,7 +305,6 @@
       </article>`;
     }).join("");
     return `<section class="hero">
-        <img class="hero-crest" src="icons/crest.png" alt="Leeds United crest">
         <div class="hero-txt"><span class="hero-kicker">Leeds United Academy · Sports Medicine</span>
           <h1>Rehab <span>Dashboard</span></h1>
           <span class="hero-tag">Marching on Together · Est. 1919</span></div>
@@ -342,26 +350,39 @@
   function renderDashboard(calc) {
     const p = player, pr = p.profile, st = calc.status;
     const tgt = isNum(p.settings.lsiTarget) ? p.settings.lsiTarget : 0.9;
-    const profile = `<section class="tiles">
-      ${tile("Player", inText("profile.name", pr.name, { ph: "Name", label: "Player" }), { cls: "w3" })}
-      ${tile("Position · squad", inText("profile.position", pr.position, { ph: "e.g. CM · U16", label: "Position and squad" }), { cls: "w2" })}
-      ${tile("Injury / diagnosis", inText("profile.injury", pr.injury, { ph: "e.g. L ACL reconstruction", label: "Injury or diagnosis" }), { cls: "w3" })}
-      ${tile("Injured side", inSel("profile.side", pr.side, [{ v: "", t: "—" }, "L", "R"], { label: "Injured side" }))}
-      ${tile("Injury date", inDate("profile.injuryDate", pr.injuryDate, { label: "Injury date" }), { cls: "w2" })}
-      ${tile("Week of rehab", out(calc.weekOfRehab, "big"), { cls: "w2 hi" })}
-      ${tile("Expected RTP", inDate("profile.rtpDate", pr.rtpDate, { label: "Expected return to play" }), { cls: "w2", hint: calc.weeksToRtp == null ? "" : calc.weeksToRtp >= 0 ? `${calc.weeksToRtp} wks to go` : `${-calc.weeksToRtp} wks past` })}
-      ${tile("DOB", inDate("profile.dob", pr.dob, { label: "Date of birth" }), { cls: "w2" })}
-      ${tile("Age (yrs)", out(C.fmt1(calc.age)))}
-      ${tile("Age at injury", out(C.fmt1(calc.ageAtInjury)))}
-      ${tile("Height (cm)", inNum("profile.height", pr.height, { label: "Height in cm" }))}
-      ${tile("Body mass (kg)", inNum("profile.mass", pr.mass, { label: "Body mass in kg" }))}
-      ${tile("Mat. offset", inNum("profile.matOffset", pr.matOffset, { label: "Maturity offset" }))}
-      ${tile("% PAH", inNum("profile.pah", pr.pah, { label: "Percent predicted adult height" }))}
-      ${tile("Maturity", out(calc.maturity))}
-      ${tile("Measured on", inDate("profile.measuredOn", pr.measuredOn, { label: "Measured on" }), { cls: "w2" })}
-      ${tile("Days post injury", out(calc.daysPost))}
-    </section>
-    <p class="fine">Maturity: % predicted adult height (PAH) if entered — &lt;85% pre · 85–95% circa · &gt;95% post — otherwise maturity offset (&lt; −1 pre · −1 to +1 circa · &gt; +1 post).</p>`;
+    const gr = calc.growth;
+    const unit = (v, f, u) => (v == null ? "" : f(v) + (u ? (u === "%" ? "" : " ") + u : ""));
+    const profile = `<div class="profile-grid">
+      <section class="card">
+        <h2 class="ttl">Player & injury</h2>
+        <div class="tiles">
+          ${tile("Player", inText("profile.name", pr.name, { ph: "Name", label: "Player" }), { cls: "w2" })}
+          ${tile("Position · squad", inText("profile.position", pr.position, { ph: "e.g. CM · U16", label: "Position and squad" }))}
+          ${tile("Injury / diagnosis", inText("profile.injury", pr.injury, { ph: "e.g. L ACL reconstruction", label: "Injury or diagnosis" }), { cls: "w2" })}
+          ${tile("Injured side", inSel("profile.side", pr.side, [{ v: "", t: "—" }, "L", "R"], { label: "Injured side" }))}
+          ${tile("Injury date", inDate("profile.injuryDate", pr.injuryDate, { label: "Injury date" }))}
+          ${tile("Week of rehab", out(calc.weekOfRehab, "big"), { cls: "hi" })}
+          ${tile("Days post injury", out(calc.daysPost))}
+          ${tile("Expected RTP", inDate("profile.rtpDate", pr.rtpDate, { label: "Expected return to play" }), { hint: calc.weeksToRtp == null ? "" : calc.weeksToRtp >= 0 ? `${calc.weeksToRtp} wks to go` : `${-calc.weeksToRtp} wks past` })}
+        </div>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2 class="ttl">Athlete profile</h2><a class="btn" href="#/p/${encodeURIComponent(p.id)}/profile">Update measurements →</a></div>
+        <div class="tiles">
+          ${tile("DOB", inDate("profile.dob", pr.dob, { label: "Date of birth" }))}
+          ${tile("Age (yrs)", out(C.fmt1(calc.age)))}
+          ${tile("Age at injury", out(C.fmt1(calc.ageAtInjury)))}
+          ${tile("Height", out(unit(gr.height, C.fmt1, "cm")))}
+          ${tile("Body mass", out(unit(gr.mass, C.fmt1, "kg")))}
+          ${tile("Predicted adult ht", out(unit(gr.predicted, C.fmt1, "cm")))}
+          ${tile("% PAH", out(unit(gr.pctPah, C.fmt1, "%")))}
+          ${tile("Mat. offset", out(gr.matOffset == null ? "" : C.fmtSigned(gr.matOffset, 1)))}
+          ${tile("Maturity", out(calc.maturity), { cls: "hi2" })}
+          ${tile("Last measured", out(C.fmtDate(gr.measuredOn, true)))}
+        </div>
+        <p class="fine">Latest values from the Athlete Profile tab. Maturity uses % predicted adult height if available (&lt;85% pre · 85–95% circa · &gt;95% post), otherwise maturity offset (&lt; −1 pre · −1 to +1 circa · &gt; +1 post).</p>
+      </section>
+    </div>`;
 
     const since = st.baseSince == null ? "Set availability and focus on the Status Log tab (newest entry by date drives this headline)."
       : `In current focus since ${C.fmtDate(st.baseSince)}${st.baseSinceWk == null ? "" : ` (wk ${st.baseSinceWk})`}   ·   set on the Status Log tab`;
@@ -467,10 +488,68 @@
     </div>
     <div class="row-actions end no-print">${btn("deleteCurrent", "Delete this player", { cls: "danger" })}</div>`;
 
-    return `<div class="dash-head"><img class="crest-md" src="icons/crest.png" alt="Leeds United crest"><div class="dash-title"><span class="club">Leeds United Academy  ·  Sports Medicine</span><h1>Rehabilitation Dashboard</h1></div><span class="est">Est. 1919</span></div>
+    return `<div class="dash-head"><div class="dash-title"><span class="club">Leeds United Academy  ·  Sports Medicine</span><h1>Rehabilitation Dashboard</h1></div><span class="est">Est. 1919</span></div>
       ${profile}${status}${regionsCard}${openCard}
       <div class="grid-2 top">${latestCard}${gpsCard}</div>
       ${progCard}${foot}`;
+  }
+
+  // ================================================================== athlete profile (growth & maturation log)
+  function renderAthlete(calc) {
+    const p = player, pr = p.profile, gr = calc.growth;
+    const f1 = (v, u) => (v == null ? "" : C.fmt1(v) + (u ? (u === "%" ? "" : " ") + u : ""));
+    const matCls = (m) => (m === "Circa-PHV" ? "warn" : "");
+    const rows = p.growth.map((g, i) => {
+      const r = gr.rows[i], base = `growth.${i}`;
+      return `<tr data-key="${esc(g.id)}">
+        <td>${inDate(`${base}.date`, g.date, { label: "Measurement date" })}</td>
+        <td class="calc c">${esc(C.fmt1(r.age))}</td>
+        <td>${inNum(`${base}.height`, g.height, { label: "Height cm" })}</td>
+        <td>${inNum(`${base}.sitting`, g.sitting, { label: "Sitting height cm" })}</td>
+        <td class="calc c">${esc(C.fmt1(r.leg))}</td>
+        <td>${inNum(`${base}.mass`, g.mass, { label: "Body mass kg" })}</td>
+        <td>${inNum(`${base}.predicted`, g.predicted, { label: "Predicted adult height cm" })}</td>
+        <td class="calc c b">${esc(f1(r.pctPah, "%"))}</td>
+        <td>${inNum(`${base}.matOffset`, g.matOffset, { label: "Maturity offset" })}</td>
+        <td class="calc c b ${matCls(r.maturity)}">${esc(r.maturity)}</td>
+        <td class="calc c">${esc(f1(r.rate))}</td>
+        <td>${inText(`${base}.notes`, g.notes, { cls: "notes", label: "Notes" })}</td>
+        <td>${btn("delRow", "✕", { cls: "x", data: { path: "growth", idx: i }, title: "Delete measurement" })}</td>
+      </tr>`;
+    }).join("");
+    const summary = `<section class="card">
+      <h2 class="ttl">Current profile</h2>
+      <div class="tiles">
+        ${tile("Date of birth", inDate("profile.dob", pr.dob, { label: "Date of birth" }))}
+        ${tile("Age (yrs)", out(C.fmt1(calc.age)))}
+        ${tile("Height", out(f1(gr.height, "cm")))}
+        ${tile("Sitting height", out(f1(gr.sitting, "cm")))}
+        ${tile("Body mass", out(f1(gr.mass, "kg")))}
+        ${tile("Predicted adult ht", out(f1(gr.predicted, "cm")))}
+        ${tile("% PAH", out(f1(gr.pctPah, "%")))}
+        ${tile("Mat. offset", out(gr.matOffset == null ? "" : C.fmtSigned(gr.matOffset, 1)))}
+        ${tile("Maturity", out(calc.maturity), { cls: "hi2" })}
+        ${tile("Growth rate", out(f1(gr.rate, "cm/yr")))}
+      </div>
+      <p class="fine">Each box shows the most recent value entered for that measure, and feeds the Dashboard automatically. Growth rate compares each height with the previous measurement (at least two weeks apart) and is shown in cm per year.</p>
+    </section>`;
+    const log = `<section class="card">
+      <div class="card-head"><h2 class="ttl">Measurements log</h2>${btn("addGrowth", "+ Add measurement", { cls: "primary" })}</div>
+      ${rows ? `<div class="scroll" data-scroll="growth"><table class="tbl entry"><thead><tr><th>Date</th><th class="c">Age</th><th class="c">Height (cm)</th><th class="c">Sitting ht (cm)</th><th class="c">Leg length (cm)</th><th class="c">Body mass (kg)</th><th class="c">Predicted adult ht (cm)</th><th class="c">% PAH</th><th class="c">Mat. offset</th><th class="c">Maturity</th><th class="c">Growth (cm/yr)</th><th>Notes</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+        : `<p class="fine">No measurements yet. Add the first one; new rows copy the previous predicted adult height.</p>`}
+    </section>`;
+    const noDob = "Add a date of birth to plot against age";
+    const charts = `<section class="card">
+      <h2 class="ttl">Growth charts</h2>
+      <div class="charts">
+        ${chart({ title: "Height (cm)", kind: "dec", xAuto: true, xTitle: "Age (years)", xTip: (x) => `age ${x.toFixed(1)}`, series: [{ name: "Height (cm)", points: gr.series("height") }], empty: pr.dob ? "No heights logged yet" : noDob, fmtTip: (v) => C.fmt1(v) + " cm" })}
+        ${chart({ title: "Body mass (kg)", kind: "dec", xAuto: true, xTitle: "Age (years)", xTip: (x) => `age ${x.toFixed(1)}`, series: [{ name: "Body mass (kg)", points: gr.series("mass") }], empty: pr.dob ? "No body mass logged yet" : noDob, fmtTip: (v) => C.fmt1(v) + " kg" })}
+        ${chart({ title: "% predicted adult height", kind: "dec", xAuto: true, xTitle: "Age (years)", xTip: (x) => `age ${x.toFixed(1)}`, target: 85, targetLabel: "85% (circa-PHV starts)", series: [{ name: "% PAH", points: gr.series(null, (r) => gr.rows[r.i].pctPah) }], empty: pr.dob ? "Needs height and predicted adult height" : noDob, fmtTip: (v) => C.fmt1(v) + "%" })}
+      </div>
+    </section>`;
+    return `<div class="pg-head"><h1>Athlete Profile — growth & maturation</h1>
+      <p class="fine">Log height, sitting height, body mass and predicted adult height whenever you measure. % PAH, maturity status and growth rate are calculated, and the latest values appear on the Dashboard.</p></div>
+      ${summary}${log}${charts}`;
   }
 
   // ================================================================== status log
@@ -862,6 +941,12 @@
       touch(); renderNow();
       focusLast(`[data-scroll="status"] tbody tr:last-child input[type=date]`);
     },
+    addGrowth() {
+      const dated = player.growth.filter((g) => C.dnum(g.date) != null).sort((a, b) => C.dnum(a.date) - C.dnum(b.date));
+      player.growth.push(C.newGrowthRow(C.todayIso(), dated[dated.length - 1]));
+      touch(); renderNow();
+      focusLast(`[data-scroll="growth"] tbody tr:last-child input[type=date]`);
+    },
     addSession() {
       player.gps.sessions.push(C.newSession(C.todayIso()));
       touch(); renderNow();
@@ -1007,6 +1092,7 @@
         const reg = regionFromTab(route.tab);
         if (reg) C.BLOCKS.forEach((b) => sortByDate(player.regions[reg].blocks[b.key].rows));
         if (route.tab === "status") sortByDate(player.statusLog);
+        if (route.tab === "profile") sortByDate(player.growth);
         if (route.tab === "gps") sortByDate(player.gps.sessions);
       }
     } else if (player) {

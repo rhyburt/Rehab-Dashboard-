@@ -14,6 +14,7 @@ A browser app version of **Rehab_Testing_Dashboard_LUFC_v5_TickBox.xlsx**: rehab
 | Workbook tab | App |
 |---|---|
 | Dashboard | **Dashboard**: player and injury details, maturity, current status, pitch-exposure chips, stage history, region ticks, what's open, latest tests with LSI and Δ, GPS summary, LSI progression charts, all regions at a glance |
+| (new) | **Athlete Profile**: dated log of height, sitting height, body mass, predicted adult height and maturity offset; % PAH, maturity status, leg length and growth rate are calculated, with growth charts. The latest values fill the Dashboard |
 | Status Log | **Status Log**: availability, base focus and stacking pitch add-ons. The newest entry drives the headline |
 | Hip / Hamstring / Knee / Ankle-Foot / Shoulder | **Region tabs**: 6 phases × 3 live exit criteria (test · measure · operator · threshold, with Y/N override), phase status, ROM / Strength / Jump blocks with 8 renameable test slots each, injured-side LSI, latest-by-date, rehab week, and L vs R progression charts |
 | GPS | **GPS**: return-to-sport criteria, pre-injury baseline, weekly totals, weekly charts, session log |
@@ -47,6 +48,6 @@ js/calc.js             data model + all calculations (no DOM; mirrors the workbo
 js/app.js              user interface, storage, backup/restore, charts
 sw.js                  offline cache
 manifest.webmanifest   install / home-screen settings
-icons/                 app icons and the club crest (icons/crest.png)
+icons/                 app icons
 source/                the original workbook and the Python script that built it
 ```
