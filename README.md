@@ -42,11 +42,11 @@ The app is cached for offline use. After changing any file, bump `CACHE` in `sw.
 
 ```
 index.html             page shell
-css/app.css            styles (Leeds United colours; cream = input, pale blue = calculated)
+css/app.css            styles (Leeds United branding; cream = input, pale blue = calculated)
 js/calc.js             data model + all calculations (no DOM; mirrors the workbook formulas)
 js/app.js              user interface, storage, backup/restore, charts
 sw.js                  offline cache
 manifest.webmanifest   install / home-screen settings
-icons/                 app icons
+icons/                 app icons and the club crest (icons/crest.png)
 source/                the original workbook and the Python script that built it
 ```

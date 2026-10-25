@@ -234,6 +234,10 @@
     morphChildren(app, tpl.content);
   }
 
+  const BRAND = `<a class="brand" href="#/" aria-label="Rehab Dashboard home"><img class="crest-sm" src="icons/crest.png" alt="">` +
+    `<span class="brand-txt"><span class="brand-top">Leeds United Academy</span><span class="brand-main">Rehab<b>Dashboard</b></span></span></a>`;
+  const FOOT = `<footer class="foot"><img src="icons/crest.png" alt=""><span>Marching on Together</span><i></i><span>Leeds United Academy · Sports Medicine</span></footer>`;
+
   function renderShell() {
     if (route.page === "player" && player) {
       const tabs = TABS.map(([k, t]) => {
@@ -242,7 +246,7 @@
         return `<a href="#/p/${encodeURIComponent(player.id)}/${k}" class="tab${route.tab === k ? " on" : ""}"${route.tab === k ? ' aria-current="page"' : ""}>${esc(t)}${dot}</a>`;
       }).join("");
       return `<header class="toolbar">
-        <a class="brand" href="#/">Rehab<b>Dashboard</b></a>
+        ${BRAND}
         <span class="who">${esc(player.profile.name || "Unnamed player")}</span>
         <span class="save" id="saveStatus">${esc(ui.saveStatus)}</span>
         <span class="spacer"></span>
@@ -251,15 +255,15 @@
         ${btn("exportPlayer", "Export", { cls: "ghost", title: "Download this player's data as a backup file" })}
       </header>
       <nav class="tabs" aria-label="Sections">${tabs}</nav>
-      <main class="page">${renderTab()}</main>`;
+      <main class="page">${renderTab()}</main>${FOOT}`;
     }
     if (route.page === "settings") {
-      return `<header class="toolbar"><a class="brand" href="#/">Rehab<b>Dashboard</b></a><span class="spacer"></span><a class="btn ghost" href="#/">← Players</a></header>
-        <main class="page narrow">${renderSettings()}</main>`;
+      return `<header class="toolbar">${BRAND}<span class="spacer"></span><a class="btn ghost" href="#/">← Players</a></header>
+        <main class="page narrow">${renderSettings()}</main>${FOOT}`;
     }
-    return `<header class="toolbar"><a class="brand" href="#/">Rehab<b>Dashboard</b></a><span class="spacer"></span>
+    return `<header class="toolbar">${BRAND}<span class="spacer"></span>
       <a class="btn ghost" href="#/settings">Settings</a></header>
-      <main class="page narrow">${renderLibrary()}</main>`;
+      <main class="page narrow">${renderLibrary()}</main>${FOOT}`;
   }
 
   function renderTab() {
@@ -291,7 +295,13 @@
         ${btn("deletePlayer", "Delete", { cls: "link danger", data: { id: e.id, name: e.name || "Unnamed player" } })}
       </article>`;
     }).join("");
-    return `<div class="lib-head"><h1>Players</h1><p class="sub">Saved privately on this device. Nothing is uploaded or shared.</p></div>
+    return `<section class="hero">
+        <img class="hero-crest" src="icons/crest.png" alt="Leeds United crest">
+        <div class="hero-txt"><span class="hero-kicker">Leeds United Academy · Sports Medicine</span>
+          <h1>Rehab <span>Dashboard</span></h1>
+          <span class="hero-tag">Marching on Together · Est. 1919</span></div>
+      </section>
+      <div class="lib-head"><h2 class="sec-h">Players</h2><p class="sub">Saved privately on this device. Nothing is uploaded or shared.</p></div>
       ${btn("newPlayer", "+ New player", { cls: "primary big" })}
       <div class="plist">${cards || `<div class="empty"><div class="empty-ico">＋</div><h2>No players yet</h2><p>Add a player, or load the worked example from the spreadsheet to see how everything fits together.</p></div>`}</div>
       <div class="lib-tools">
@@ -457,7 +467,7 @@
     </div>
     <div class="row-actions end no-print">${btn("deleteCurrent", "Delete this player", { cls: "danger" })}</div>`;
 
-    return `<div class="dash-head"><h1>Rehabilitation Dashboard</h1><span class="club">LEEDS UNITED ACADEMY  ·  SPORTS MEDICINE</span></div>
+    return `<div class="dash-head"><img class="crest-md" src="icons/crest.png" alt="Leeds United crest"><div class="dash-title"><span class="club">Leeds United Academy  ·  Sports Medicine</span><h1>Rehabilitation Dashboard</h1></div><span class="est">Est. 1919</span></div>
       ${profile}${status}${regionsCard}${openCard}
       <div class="grid-2 top">${latestCard}${gpsCard}</div>
       ${progCard}${foot}`;
