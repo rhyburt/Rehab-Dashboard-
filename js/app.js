@@ -214,14 +214,15 @@
     }
     let marks = "", hits = "";
     series.forEach((s, si) => {
-      const color = SERIES[si % SERIES.length], shape = SHAPES[si % SHAPES.length];
+      const ci = s.ci != null ? s.ci : si;
+      const color = SERIES[ci % SERIES.length], shape = s.dash ? "diamond" : SHAPES[ci % SHAPES.length];
       let d = "", pen = false;
       s.points.forEach((p) => {
-        if (p[1] == null) { pen = false; return; }
+        if (p[1] == null) { if (!s.connect) pen = false; return; }
         d += `${pen ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`;
         pen = true;
       });
-      marks += `<path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>`;
+      marks += `<path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"${s.dash ? ' stroke-dasharray="6 5"' : ""}/>`;
       s.points.forEach((p) => {
         if (p[1] == null) return;
         const x = X(p[0]), y = Y(p[1]);
@@ -229,9 +230,19 @@
         hits += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="11" class="hit" data-tip="${esc(`${s.name} · ${o.xTip ? o.xTip(p[0]) : "wk " + p[0]} · ${o.fmtTip ? o.fmtTip(p[1]) : fmtAxis(p[1], o.kind)}`)}"/>`;
       });
     });
-    const legend = series.length > 1 || o.legend ? `<div class="legend">${series.map((s, si) =>
-      `<span><svg width="22" height="12" aria-hidden="true"><line x1="0" x2="22" y1="6" y2="6" stroke="${SERIES[si % SERIES.length]}" stroke-width="2"/>${markerSvg(SHAPES[si % SHAPES.length], 11, 6, 3.6, SERIES[si % SERIES.length])}</svg>${esc(s.name)}</span>`).join("")}</div>` : "";
+    const legend = series.length > 1 || o.legend ? `<div class="legend">${series.map((s, si) => {
+      const ci = s.ci != null ? s.ci : si, col = SERIES[ci % SERIES.length];
+      return `<span><svg width="22" height="12" aria-hidden="true"><line x1="0" x2="22" y1="6" y2="6" stroke="${col}" stroke-width="2"${s.dash ? ' stroke-dasharray="4 3"' : ""}/>${markerSvg(s.dash ? "diamond" : SHAPES[ci % SHAPES.length], 11, 6, 3.6, col)}</svg>${esc(s.name)}</span>`;
+    }).join("")}</div>` : "";
     return `<figure class="chart">${head}<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.title || "")}">${g}${marks}${hits}</svg>${legend}</figure>`;
+  }
+
+  // On-pitch weeks plot solid (0 when no pitch session); Alter-G weeks plot dashed, joined across weeks without Alter-G
+  function gpsSeries(gc, key, label, ci, gap) {
+    const out = [{ name: `${label} — on pitch`, ci, points: gc.weeks.map((w) => [w.wk, w.n ? w[key] : gap ? null : 0]) }];
+    if (gc.ag.any) out.push({ name: `${label} — Alter-G`, ci, dash: true, connect: true, points: gc.ag.weeks.map((w) => [w.wk, w.n && w.has[key] ? w[key] : null]) });
+    if (!gc.ag.any) out[0].name = label;
+    return out;
   }
 
   // ================================================================== render: shell
@@ -454,12 +465,13 @@
       ${grow(`Latest week${gps.latestWeek ? ` (wk ${gps.latestWeek})` : ""}`, gcols.map((m) => `<td class="c">${gps.latest ? esc(fmtG(m, gps.latest[m.key])) : ""}</td>`).join(""))}
       ${grow("% of baseline", gcols.map((m) => `<td class="c b ${ratioClass(gps.latestRatio[m.key], 1, 0.8)}">${esc(C.fmtPct(gps.latestRatio[m.key]))}</td>`).join(""))}
       ${grow("Best week to date", gcols.map((m) => `<td class="c">${esc(fmtG(m, gps.best[m.key]))}</td>`).join(""))}
+      ${gps.ag.latest ? grow(`Alter-G latest (wk ${gps.ag.latestWeek}${isNum(gps.ag.latest.bw) ? ` · ${C.fmtNum(gps.ag.latest.bw)}% BW` : ""})`, gcols.map((m) => `<td class="c ag">${gps.ag.latest.has[m.key] ? esc(fmtG(m, gps.ag.latest[m.key])) : "—"}</td>`).join("")) : ""}
     </tbody></table>`;
     const gpsCard = `<section class="card">
       <h2 class="ttl">GPS   ·   weekly pitch load</h2>
       <div class="scroll">${gpsTable}</div>
       <p class="fine">Speeds in m/s. Criteria, baseline and the session log are on the <a class="inline" href="#/p/${encodeURIComponent(p.id)}/gps">GPS tab</a>. GPS return-to-sport criteria: <b>${gps.yCount} / 6</b> · <span class="badge ${statusClass(gps.rtsStatus)}">${esc(gps.rtsStatus)}</span></p>
-      ${chart({ title: "Weekly total distance (m)", kind: "int", zero: true, series: [{ name: "TD (m)", points: gps.weeks.map((w) => [w.wk, w.n ? w.td : 0]) }], empty: "No GPS sessions logged yet", fmtTip: (v) => C.fmtInt(v) + " m" })}
+      ${chart({ title: "Weekly total distance (m)", kind: "int", zero: true, legend: gps.ag.any, series: gpsSeries(gps, "td", "TD (m)", 0), empty: "No GPS sessions logged yet", fmtTip: (v) => C.fmtInt(v) + " m" })}
     </section>`;
 
     const chRegion = calc.regions[calc.chartRegion];
@@ -720,38 +732,45 @@
       <tbody><tr><td>${inText("gps.baseline.source", g.baseline.source, { ph: "e.g. 4-wk pre-injury avg", label: "Baseline source" })}</td>${C.GPS_METRICS.map((m) => `<td>${inNum(`gps.baseline.${m.key}`, g.baseline[m.key], { label: `Baseline ${m.label}` })}</td>`).join("")}<td>${inText("gps.baseline.notes", g.baseline.notes, { cls: "notes", label: "Notes" })}</td></tr></tbody></table></div>
     </section>`;
     const weeks = gc.weeks;
-    const weekPts = (key, gap) => weeks.map((w) => [w.wk, w.n ? w[key] : gap ? null : 0]);
     const charts = `<section class="card">
       <h2 class="ttl">Weekly charts</h2>
       <div class="charts">
-        ${chart({ title: "Weekly total distance (m)", kind: "int", zero: true, series: [{ name: "TD (m)", points: weekPts("td") }], empty: "No sessions logged yet", fmtTip: (v) => C.fmtInt(v) + " m" })}
-        ${chart({ title: "Weekly HSR & sprint distance (m)", kind: "int", zero: true, series: [{ name: "HSR (m)", points: weekPts("hsr") }, { name: "SD (m)", points: weekPts("sd") }], empty: "No sessions logged yet", fmtTip: (v) => C.fmtInt(v) + " m" })}
-        ${chart({ title: "Weekly top speed (m/s)", kind: "dec", series: [{ name: "Top speed (m/s)", points: weekPts("top", true) }], empty: "No sessions logged yet", fmtTip: (v) => C.fmt1(v) + " m/s" })}
+        ${chart({ title: "Weekly total distance (m)", kind: "int", zero: true, legend: gc.ag.any, series: gpsSeries(gc, "td", "TD (m)", 0), empty: "No sessions logged yet", fmtTip: (v) => C.fmtInt(v) + " m" })}
+        ${chart({ title: "Weekly HSR & sprint distance (m)", kind: "int", zero: true, series: gpsSeries(gc, "hsr", "HSR (m)", 0).concat(gpsSeries(gc, "sd", "SD (m)", 1)), empty: "No sessions logged yet", fmtTip: (v) => C.fmtInt(v) + " m" })}
+        ${chart({ title: "Weekly top speed (m/s)", kind: "dec", legend: gc.ag.any, series: gpsSeries(gc, "top", "Top speed (m/s)", 0, true), empty: "No sessions logged yet", fmtTip: (v) => C.fmt1(v) + " m/s" })}
       </div>
-      <p class="fine">Lines stop at the latest logged week; a week with no sessions plots as 0 (top speed leaves a gap).</p>
+      <p class="fine">Solid lines = true on-pitch sessions; dashed lines = Alter-G sessions. % of baseline, the GPS exit criteria and the Dashboard chips use on-pitch sessions only. Lines stop at the latest logged week; a week with no on-pitch sessions plots as 0 (top speed leaves a gap).</p>
     </section>`;
     const pctCell = (v) => `<td class="c ${ratioClass(v, 1, 0.8)}">${esc(C.fmtPct(v))}</td>`;
     const ratio = (w, k) => (w.n && isNum(g.baseline[k]) && g.baseline[k] !== 0 ? w[k] / g.baseline[k] : null);
-    const weekRows = weeks.map((w) => `<tr class="${w.n ? "" : "muted"}"><td class="c b">${w.wk}</td><td class="c">${w.n}</td>${C.GPS_METRICS.map((m) => `<td class="c">${w.n ? esc(m.key === "top" ? C.fmt1(w[m.key]) : C.fmtInt(w[m.key])) : ""}</td>`).join("")}${pctCell(ratio(w, "td"))}${pctCell(ratio(w, "hsr"))}${pctCell(ratio(w, "sd"))}</tr>`).join("");
+    const agCells = (wk) => {
+      if (!gc.ag.any) return "";
+      const a = gc.ag.weeks[wk - 1];
+      return a && a.n ? `<td class="c ag">${a.n}</td><td class="c ag">${a.has.td ? esc(C.fmtInt(a.td)) : ""}</td><td class="c ag">${a.has.top ? esc(C.fmt1(a.top)) : ""}</td><td class="c ag">${isNum(a.bw) ? esc(C.fmtNum(a.bw)) + "%" : ""}</td>`
+        : `<td class="ag"></td><td class="ag"></td><td class="ag"></td><td class="ag"></td>`;
+    };
+    const weekRows = weeks.map((w) => `<tr class="${w.n || (gc.ag.weeks[w.wk - 1] || {}).n ? "" : "muted"}"><td class="c b">${w.wk}</td><td class="c">${w.n}</td>${C.GPS_METRICS.map((m) => `<td class="c">${w.n ? esc(m.key === "top" ? C.fmt1(w[m.key]) : C.fmtInt(w[m.key])) : ""}</td>`).join("")}${pctCell(ratio(w, "td"))}${pctCell(ratio(w, "hsr"))}${pctCell(ratio(w, "sd"))}${agCells(w.wk)}</tr>`).join("");
     const weekCard = `<section class="card">
-      <h2 class="ttl">Weekly totals <span class="ttl-hint">— auto-calculated from the session log</span></h2>
-      ${weeks.length ? `<div class="scroll"><table class="tbl"><thead><tr><th class="c">Week #</th><th class="c"># Sessions</th>${C.GPS_METRICS.map((m) => `<th class="c">${esc(m.label)}</th>`).join("")}<th class="c">% Baseline TD</th><th class="c">% Baseline HSR</th><th class="c">% Baseline SD</th></tr></thead><tbody>${weekRows}</tbody></table></div>`
+      <h2 class="ttl">Weekly totals <span class="ttl-hint">— auto-calculated from the session log; on-pitch columns exclude Alter-G</span></h2>
+      ${weeks.length ? `<div class="scroll"><table class="tbl"><thead><tr><th class="c">Week #</th><th class="c"># Sessions</th>${C.GPS_METRICS.map((m) => `<th class="c">${esc(m.label)}</th>`).join("")}<th class="c">% Baseline TD</th><th class="c">% Baseline HSR</th><th class="c">% Baseline SD</th>${gc.ag.any ? `<th class="c ag-h">Alter-G sessions</th><th class="c ag-h">Alter-G TD (m)</th><th class="c ag-h">Alter-G top speed (m/s)</th><th class="c ag-h">Alter-G % BW (max)</th>` : ""}</tr></thead><tbody>${weekRows}</tbody></table></div>`
         : `<p class="fine">${inj ? "No sessions logged on or after the injury date yet." : "Set the injury date on the Dashboard — week numbers count from it."}</p>`}
     </section>`;
     const sess = g.sessions.map((s, i) => {
       const sb = `gps.sessions.${i}`, wk = C.weekOf(s.date, inj);
-      return `<tr data-key="${esc(s.id)}"><td>${inDate(`${sb}.date`, s.date, { label: "Session date" })}</td><td class="calc c">${wk == null ? "" : wk}</td>
+      return `<tr data-key="${esc(s.id)}" class="${s.alterg ? "ag-row" : ""}"><td>${inDate(`${sb}.date`, s.date, { label: "Session date" })}</td><td class="calc c">${wk == null ? "" : wk}</td>
         <td>${inSel(`${sb}.type`, s.type, [""].concat(lists.sessionTypes), { label: "Session type" })}</td>
+        <td class="c">${inCheck(`${sb}.alterg`, !!s.alterg, { cls: "tickbox", label: "Alter-G session" })}</td>
+        <td>${s.alterg ? inNum(`${sb}.bw`, s.bw, { label: "Alter-G percent body weight", ph: "%" }) : ""}</td>
         ${C.GPS_METRICS.map((m) => `<td>${inNum(`${sb}.${m.key}`, s[m.key], { label: m.label })}</td>`).join("")}
         <td>${inText(`${sb}.notes`, s.notes, { cls: "notes", label: "Notes" })}</td><td>${btn("delRow", "✕", { cls: "x", data: { path: "gps.sessions", idx: i }, title: "Delete session" })}</td></tr>`;
     }).join("");
     const logCard = `<section class="card">
-      <div class="card-head"><h2 class="ttl">Session log <span class="ttl-hint">— one row per pitch session</span></h2>${btn("addSession", "+ Add session", { cls: "primary" })}</div>
-      ${sess ? `<div class="scroll" data-scroll="sessions"><table class="tbl entry"><thead><tr><th>Date</th><th class="c">Wk</th><th>Session type</th>${C.GPS_METRICS.map((m) => `<th class="c">${esc(m.label)}</th>`).join("")}<th>Notes</th><th></th></tr></thead><tbody>${sess}</tbody></table></div>`
+      <div class="card-head"><h2 class="ttl">Session log <span class="ttl-hint">— one row per session; tick Alter-G for anti-gravity treadmill sessions</span></h2><div class="row-actions">${btn("addAlterG", "+ Add Alter-G session")}${btn("addSession", "+ Add pitch session", { cls: "primary" })}</div></div>
+      ${sess ? `<div class="scroll" data-scroll="sessions"><table class="tbl entry"><thead><tr><th>Date</th><th class="c">Wk</th><th>Session type</th><th class="c">Alter-G</th><th class="c">% BW</th>${C.GPS_METRICS.map((m) => `<th class="c">${esc(m.label)}</th>`).join("")}<th>Notes</th><th></th></tr></thead><tbody>${sess}</tbody></table></div>`
         : `<p class="fine">No sessions yet.</p>`}
     </section>`;
     return `<div class="pg-head"><h1>GPS — Pitch Load & Return-to-Sport Metrics</h1>
-      <p class="fine">Log every pitch session in the session log. Week # fills in from the injury date on the Dashboard. Weekly totals, % of baseline, the charts, the Dashboard and any GPS-based exit criteria update automatically. Speeds in m/s (km/h ÷ 3.6).</p></div>
+      <p class="fine">Log every pitch session in the session log, and tick Alter-G for anti-gravity treadmill sessions (with % body weight) so they're tracked separately from true on-pitch load. Week # fills in from the injury date on the Dashboard. Weekly totals, % of baseline, the charts, the Dashboard and any GPS-based exit criteria update automatically. Speeds in m/s (km/h ÷ 3.6).</p></div>
       ${critCard}${baseCard}${charts}${weekCard}${logCard}`;
   }
 
@@ -946,6 +965,14 @@
       player.growth.push(C.newGrowthRow(C.todayIso(), dated[dated.length - 1]));
       touch(); renderNow();
       focusLast(`[data-scroll="growth"] tbody tr:last-child input[type=date]`);
+    },
+    addAlterG() {
+      const s = C.newSession(C.todayIso());
+      s.alterg = true;
+      s.type = "Rehab";
+      player.gps.sessions.push(s);
+      touch(); renderNow();
+      focusLast(`[data-scroll="sessions"] tbody tr:last-child input[type=date]`);
     },
     addSession() {
       player.gps.sessions.push(C.newSession(C.todayIso()));

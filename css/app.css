@@ -405,3 +405,7 @@ input[type=checkbox]:focus-visible { outline: 2px solid var(--blue-2); outline-o
 }
 
 .tbl td.calc { white-space: nowrap; }
+.tbl td.ag { background: #F6F1DC; }
+.tbl th.ag-h { background: #F3E7B5; color: #6B5300; }
+.tbl tr.ag-row td { background: #FBF7E6; }
+.tbl tr.ag-row td.calc { background: #F3EED8; }

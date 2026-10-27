@@ -17,7 +17,7 @@ A browser app version of **Rehab_Testing_Dashboard_LUFC_v5_TickBox.xlsx**: rehab
 | (new) | **Athlete Profile**: dated log of height, sitting height, body mass, predicted adult height and maturity offset; % PAH, maturity status, leg length and growth rate are calculated, with growth charts. The latest values fill the Dashboard |
 | Status Log | **Status Log**: availability, base focus and stacking pitch add-ons. The newest entry drives the headline |
 | Hip / Hamstring / Knee / Ankle-Foot / Shoulder | **Region tabs**: 6 phases × 3 live exit criteria (test · measure · operator · threshold, with Y/N override), phase status, ROM / Strength / Jump blocks with 8 renameable test slots each, injured-side LSI, latest-by-date, rehab week, and L vs R progression charts |
-| GPS | **GPS**: return-to-sport criteria, pre-injury baseline, weekly totals, weekly charts, session log |
+| GPS | **GPS**: return-to-sport criteria, pre-injury baseline, weekly totals, weekly charts, session log. Sessions can be marked **Alter-G** (with % body weight): they plot as dashed lines and are kept out of the on-pitch % baseline, criteria and chips |
 | Lists | **Settings**: the availability, focus and session-type dropdowns |
 
 The calculations reproduce the workbook's formulas. The worked example (Players → **Load example player**) gives the same results as the spreadsheet: the same phases, LSIs, Δs, criteria, GPS weeks and status chips.

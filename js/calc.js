@@ -254,7 +254,8 @@
       predicted: prev && isNum(prev.predicted) ? prev.predicted : null, matOffset: null, notes: "" };
   }
   function newSession(date) {
-    return { id: uid("g"), date: date || "", type: "", td: null, hsr: null, sd: null, acc: null, dec: null, top: null, notes: "" };
+    // alterg: anti-gravity treadmill session (kept apart from true on-pitch load); bw = % body weight on the Alter-G
+    return { id: uid("g"), date: date || "", type: "", alterg: false, bw: null, td: null, hsr: null, sd: null, acc: null, dec: null, top: null, notes: "" };
   }
 
   // Fill in anything missing (older saves, imported backups) without touching existing values.
@@ -344,6 +345,8 @@
           const row = newSession(s.date);
           Object.keys(row).forEach((k) => { if (s[k] !== undefined && k !== "date") row[k] = s[k]; });
           GPS_METRICS.forEach((m) => { if (!isNum(row[m.key])) row[m.key] = null; });
+          row.alterg = !!s.alterg;
+          row.bw = isNum(s.bw) ? s.bw : null;
           return row;
         });
       }
@@ -384,6 +387,12 @@
       s.type = type;
       GPS_METRICS.forEach((m, i) => { s[m.key] = v[i]; });
       s.notes = NOTE;
+      p.gps.sessions.push(s);
+    });
+    // Alter-G (anti-gravity treadmill) block before returning to the pitch
+    [["2026-09-22", 70, 2400, 4.5], ["2026-09-29", 80, 3100, 5.0], ["2026-10-06", 90, 3600, 5.4]].forEach(([date, bw, td, top]) => {
+      const s = newSession(date);
+      Object.assign(s, { type: "Rehab", alterg: true, bw, td, top, notes: NOTE });
       p.gps.sessions.push(s);
     });
     [["2026-08-10", AVAIL[0], FOCUS[0], []], ["2026-09-14", AVAIL[0], FOCUS[1], []], ["2026-10-12", AVAIL[0], FOCUS[2], []],
@@ -447,23 +456,37 @@
     return { rows, slots, lastTest };
   }
 
-  function calcGps(player) {
-    const inj = player.profile.injuryDate, base = player.gps.baseline;
+  // Weekly totals by rehab week (sum per metric, max for top speed)
+  function weeklyTotals(sessions, inj) {
     const byWeek = {};
     let latestWeek = 0;
-    player.gps.sessions.forEach((s) => {
+    sessions.forEach((s) => {
       const wk = weekOf(s.date, inj);
       if (wk == null || wk < 1) return;
-      const w = byWeek[wk] || (byWeek[wk] = { wk, n: 0, td: 0, hsr: 0, sd: 0, acc: 0, dec: 0, top: 0 });
+      const w = byWeek[wk] || (byWeek[wk] = { wk, n: 0, td: 0, hsr: 0, sd: 0, acc: 0, dec: 0, top: 0, bw: null, has: {} });
       w.n++;
       GPS_METRICS.forEach((m) => {
+        if (isNum(s[m.key])) w.has[m.key] = true;
         const v = isNum(s[m.key]) ? s[m.key] : 0;
         w[m.key] = m.max ? Math.max(w[m.key], v) : w[m.key] + v;
       });
+      if (isNum(s.bw)) w.bw = w.bw == null ? s.bw : Math.max(w.bw, s.bw);
       latestWeek = Math.max(latestWeek, wk);
     });
+    return { byWeek, latestWeek };
+  }
+
+  // On-pitch sessions drive every GPS figure (baseline %, criteria, chips); Alter-G sessions are tracked alongside.
+  function calcGps(player) {
+    const inj = player.profile.injuryDate, base = player.gps.baseline;
+    const pitch = weeklyTotals(player.gps.sessions.filter((s) => !s.alterg), inj);
+    const ag = weeklyTotals(player.gps.sessions.filter((s) => s.alterg), inj);
+    const byWeek = pitch.byWeek, latestWeek = pitch.latestWeek;
+    const lastWeek = Math.max(latestWeek, ag.latestWeek);
     const weeks = [];
-    for (let wk = 1; wk <= latestWeek; wk++) weeks.push(byWeek[wk] || { wk, n: 0 });
+    for (let wk = 1; wk <= lastWeek; wk++) weeks.push(byWeek[wk] || { wk, n: 0 });
+    const agWeeks = [];
+    for (let wk = 1; wk <= lastWeek; wk++) agWeeks.push(ag.byWeek[wk] || { wk, n: 0 });
     const logged = weeks.filter((w) => w.n > 0);
     const best = {}, bestRatio = {};
     GPS_METRICS.forEach((m) => {
@@ -479,7 +502,11 @@
     });
     const yCount = player.gps.criteria.filter((c) => c.achieved === "Y").length;
     const rtsStatus = yCount === GPS_RTS.length ? "READY" : yCount === 0 ? "NOT READY" : "IN PROGRESS";
-    return { weeks, latestWeek, latest, best, bestRatio, latestRatio, yCount, rtsStatus };
+    return {
+      weeks, latestWeek, latest, best, bestRatio, latestRatio, yCount, rtsStatus,
+      ag: { weeks: agWeeks, latestWeek: ag.latestWeek, latest: ag.latestWeek ? ag.byWeek[ag.latestWeek] : null,
+        any: player.gps.sessions.some((s) => s.alterg) },
+    };
   }
 
   function criterionCurrent(c, feed, side, gps) {
