@@ -228,7 +228,7 @@
     const regions = {};
     REGIONS.forEach((r) => { regions[r] = newRegion(r); });
     return {
-      id: uid("p"), schema: 1, created: now, updated: now,
+      id: uid("p"), schema: 1, created: now, updated: now, archivedOn: "",
       profile: { name: "", position: "", injury: "", side: "", injuryDate: "", rtpDate: "", dob: "" },
       growth: [],
       settings: { ticks: {}, lsiTarget: 0.9, chartRegion: "", chartSlot: {} },
@@ -265,6 +265,7 @@
     if (raw.id) p.id = str(raw.id);
     p.created = raw.created || p.created;
     p.updated = raw.updated || p.updated;
+    p.archivedOn = typeof raw.archivedOn === "string" ? raw.archivedOn : "";
     Object.keys(p.profile).forEach((k) => { if (raw.profile && raw.profile[k] !== undefined) p.profile[k] = raw.profile[k]; });
     if (Array.isArray(raw.growth)) {
       p.growth = raw.growth.map((g) => {

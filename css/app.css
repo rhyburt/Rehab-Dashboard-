@@ -409,3 +409,26 @@ input[type=checkbox]:focus-visible { outline: 2px solid var(--blue-2); outline-o
 .tbl th.ag-h { background: #F3E7B5; color: #6B5300; }
 .tbl tr.ag-row td { background: #FBF7E6; }
 .tbl tr.ag-row td.calc { background: #F3EED8; }
+
+/* archive */
+.pcard-acts { display: flex; flex-direction: column; align-items: flex-end; padding-top: 6px; }
+.pcard .pcard-acts .btn.link { margin-top: 0; }
+.pcard.archived { border-left-color: #B7C0D3; opacity: .85; }
+.pcard.archived .pname { color: var(--ink-2); }
+.arch-head { margin: 14px 0 8px; }
+.arch-head .btn.link { padding-left: 0; font-weight: 700; color: var(--blue-2); }
+.arch-banner { background: var(--light); border-left: 6px solid var(--blue); color: var(--blue); padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.btn.small { min-height: 30px; padding: 4px 10px; font-size: 12.5px; }
+
+/* CSV import */
+.imp-panel { background: var(--pale); border: 1px solid var(--light); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+.imp-panel .sub-ttl { margin-top: 0; }
+.imp-src { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.imp-src .grow { flex: 1 1 320px; }
+.imp-or { color: var(--mute); font-weight: 600; padding-bottom: 10px; }
+.in.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; white-space: pre; }
+.imp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 14px; margin: 10px 0; }
+.imp-opts { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 10px; }
+.imp-slots select.in { min-width: 220px; }
+.imp-sum { background: var(--good-bg); color: var(--good); border-radius: 8px; padding: 8px 12px; margin: 10px 0; font-size: 13px; }
+.imp-sum.warn-box { background: var(--warn-bg); color: var(--warn); }

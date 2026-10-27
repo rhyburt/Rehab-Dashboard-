@@ -45,6 +45,7 @@
       id: p.id, name: p.profile.name, position: p.profile.position, injury: p.profile.injury, injuryDate: p.profile.injuryDate,
       availability: c.status.latest ? c.status.availability : "",
       regions: c.ticked.map((r) => ({ r, phase: c.regions[r].currentPhase, cleared: c.regions[r].clearedText })),
+      archivedOn: p.archivedOn || "",
       updated: p.updated,
     };
   }
@@ -53,7 +54,8 @@
   let route = parseHash();
   let player = null;
   let lists = store.getLists();
-  const ui = { saveStatus: "", editSlots: {} };
+  const ui = { saveStatus: "", editSlots: {}, imp: null, showArchived: false };
+  const X = window.CSVImport;
 
   function parseHash() {
     const h = (location.hash || "").replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
@@ -300,21 +302,31 @@
   function renderLibrary() {
     const idx = store.getIndex();
     const today = C.todayNum();
-    const cards = idx.map((e) => {
+    const card = (e) => {
       const inj = C.dnum(e.injuryDate);
       const wk = inj == null ? null : Math.floor((today - inj) / 7) + 1;
       const meta = [e.position, e.injury].filter(Boolean).map(esc).join(" · ");
       const regs = (e.regions || []).map((r) => `<span class="pill">${esc(C.regionTitle(r.r))} · ${esc(r.phase)} <em>${esc(r.cleared)}</em></span>`).join("");
-      return `<article class="pcard" data-key="${esc(e.id)}">
+      const arch = !!e.archivedOn;
+      const data = { id: e.id, name: e.name || "Unnamed player" };
+      return `<article class="pcard${arch ? " archived" : ""}" data-key="${esc(e.id)}">
         <a class="pcard-main" href="#/p/${encodeURIComponent(e.id)}/dashboard">
           <div class="pname">${esc(e.name || "Unnamed player")}</div>
           ${meta ? `<div class="pmeta">${meta}</div>` : ""}
-          <div class="pmeta">${inj == null ? "No injury date" : `Injured ${esc(C.fmtDate(e.injuryDate, true))} · week ${wk} of rehab`}</div>
-          <div class="pfoot">${e.availability ? `<span class="badge ${availClass(e.availability)}">${esc(e.availability)}</span>` : `<span class="badge">No status yet</span>`}${regs}</div>
+          <div class="pmeta">${arch ? `Archived ${esc(C.fmtDate(e.archivedOn, true))}${inj == null ? "" : ` · injured ${esc(C.fmtDate(e.injuryDate, true))}`}`
+            : inj == null ? "No injury date" : `Injured ${esc(C.fmtDate(e.injuryDate, true))} · week ${wk} of rehab`}</div>
+          ${arch ? "" : `<div class="pfoot">${e.availability ? `<span class="badge ${availClass(e.availability)}">${esc(e.availability)}</span>` : `<span class="badge">No status yet</span>`}${regs}</div>`}
         </a>
-        ${btn("deletePlayer", "Delete", { cls: "link danger", data: { id: e.id, name: e.name || "Unnamed player" } })}
+        <div class="pcard-acts">
+          ${arch ? btn("unarchivePlayer", "Restore", { cls: "link", data }) : btn("archivePlayer", "Archive", { cls: "link", data, title: "Move to archived players (e.g. returned to play)" })}
+          ${btn("deletePlayer", "Delete", { cls: "link danger", data })}
+        </div>
       </article>`;
-    }).join("");
+    };
+    const active = idx.filter((e) => !e.archivedOn), archived = idx.filter((e) => e.archivedOn);
+    const cards = active.map(card).join("");
+    const archivedHtml = archived.length ? `<div class="arch-head">${btn("toggleArchived", `${ui.showArchived ? "Hide" : "Show"} archived players (${archived.length})`, { cls: "link" })}</div>
+      ${ui.showArchived ? `<div class="plist">${archived.map(card).join("")}</div>` : ""}` : "";
     return `<section class="hero">
         <div class="hero-txt"><span class="hero-kicker">Leeds United Academy · Sports Medicine</span>
           <h1>Rehab <span>Dashboard</span></h1>
@@ -322,7 +334,9 @@
       </section>
       <div class="lib-head"><h2 class="sec-h">Players</h2><p class="sub">Saved privately on this device. Nothing is uploaded or shared.</p></div>
       ${btn("newPlayer", "+ New player", { cls: "primary big" })}
-      <div class="plist">${cards || `<div class="empty"><div class="empty-ico">＋</div><h2>No players yet</h2><p>Add a player, or load the worked example from the spreadsheet to see how everything fits together.</p></div>`}</div>
+      <div class="plist">${cards || (archived.length ? `<div class="empty"><h2>No players in rehab</h2><p>Everyone is archived. Add a new player when someone gets injured.</p></div>`
+        : `<div class="empty"><div class="empty-ico">＋</div><h2>No players yet</h2><p>Add a player, or load the worked example from the spreadsheet to see how everything fits together.</p></div>`)}</div>
+      ${archivedHtml}
       <div class="lib-tools">
         ${btn("loadExample", "Load example player")}
         ${btn("exportAll", "Back up all players")}
@@ -498,9 +512,10 @@
       <section class="card"><h2 class="ttl">All regions at a glance</h2><div class="scroll"><table class="tbl"><thead><tr><th>Region</th><th>Current phase</th><th class="c">Cleared</th><th class="c">Status</th><th class="c">Last test</th></tr></thead><tbody>${glance}</tbody></table></div></section>
       <section class="card"><h2 class="ttl">How it works</h2><ul class="notes">${notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></section>
     </div>
-    <div class="row-actions end no-print">${btn("deleteCurrent", "Delete this player", { cls: "danger" })}</div>`;
+    <div class="row-actions end no-print">${p.archivedOn ? btn("unarchiveCurrent", "Restore to active players") : btn("archiveCurrent", "Archive player (returned to play)")}${btn("deleteCurrent", "Delete this player", { cls: "danger" })}</div>`;
 
-    return `<div class="dash-head"><div class="dash-title"><span class="club">Leeds United Academy  ·  Sports Medicine</span><h1>Rehabilitation Dashboard</h1></div><span class="est">Est. 1919</span></div>
+    const archBanner = p.archivedOn ? `<div class="arch-banner no-print"><b>Archived ${esc(C.fmtDate(p.archivedOn, true))}</b> — this player is in the archived list. Their history is kept and can still be edited. ${btn("unarchiveCurrent", "Restore to active players", { cls: "small" })}</div>` : "";
+    return `${archBanner}<div class="dash-head"><div class="dash-title"><span class="club">Leeds United Academy  ·  Sports Medicine</span><h1>Rehabilitation Dashboard</h1></div><span class="est">Est. 1919</span></div>
       ${profile}${status}${regionsCard}${openCard}
       <div class="grid-2 top">${latestCard}${gpsCard}</div>
       ${progCard}${foot}`;
@@ -706,7 +721,8 @@
     }
     return `<section class="card">
       <div class="card-head"><h2 class="ttl">${esc(title)} <span class="ttl-hint">— ${esc(b.hint)}</span></h2>
-        <div class="row-actions">${btn("toggleSlots", editing ? "Done" : "Edit tests", { data: { key: ukey } })}${btn("addRow", "+ Add test date", { cls: "primary", data: { region, block: b.key } })}</div></div>
+        <div class="row-actions">${btn("toggleSlots", editing ? "Done" : "Edit tests", { data: { key: ukey } })}${btn("importCsv", "Import CSV", { data: { target: `${region}|${b.key}` } })}${btn("addRow", "+ Add test date", { cls: "primary", data: { region, block: b.key } })}</div></div>
+      ${ui.imp && ui.imp.target === `${region}|${b.key}` ? renderImport() : ""}
       ${slotEditor}${table}
     </section>`;
   }
@@ -765,7 +781,8 @@
         <td>${inText(`${sb}.notes`, s.notes, { cls: "notes", label: "Notes" })}</td><td>${btn("delRow", "✕", { cls: "x", data: { path: "gps.sessions", idx: i }, title: "Delete session" })}</td></tr>`;
     }).join("");
     const logCard = `<section class="card">
-      <div class="card-head"><h2 class="ttl">Session log <span class="ttl-hint">— one row per session; tick Alter-G for anti-gravity treadmill sessions</span></h2><div class="row-actions">${btn("addAlterG", "+ Add Alter-G session")}${btn("addSession", "+ Add pitch session", { cls: "primary" })}</div></div>
+      <div class="card-head"><h2 class="ttl">Session log <span class="ttl-hint">— one row per session; tick Alter-G for anti-gravity treadmill sessions</span></h2><div class="row-actions">${btn("importCsv", "Import CSV", { data: { target: "gps" } })}${btn("addAlterG", "+ Add Alter-G session")}${btn("addSession", "+ Add pitch session", { cls: "primary" })}</div></div>
+      ${ui.imp && ui.imp.target === "gps" ? renderImport() : ""}
       ${sess ? `<div class="scroll" data-scroll="sessions"><table class="tbl entry"><thead><tr><th>Date</th><th class="c">Wk</th><th>Session type</th><th class="c">Alter-G</th><th class="c">% BW</th>${C.GPS_METRICS.map((m) => `<th class="c">${esc(m.label)}</th>`).join("")}<th>Notes</th><th></th></tr></thead><tbody>${sess}</tbody></table></div>`
         : `<p class="fine">No sessions yet.</p>`}
     </section>`;
@@ -773,6 +790,188 @@
       <p class="fine">Log every pitch session in the session log, and tick Alter-G for anti-gravity treadmill sessions (with % body weight) so they're tracked separately from true on-pitch load. Week # fills in from the injury date on the Dashboard. Weekly totals, % of baseline, the charts, the Dashboard and any GPS-based exit criteria update automatically. Speeds in m/s (km/h ÷ 3.6).</p></div>
       ${critCard}${baseCard}${charts}${weekCard}${logCard}`;
   }
+
+  // ================================================================== CSV import (GPS sessions or a test block)
+  const SESSION_WORDS = [["match", "Match"], ["game", "Match"], ["rehab", "Rehab"], ["individual", "Individual"], ["training", "Training"]];
+  function importTarget() {
+    const t = ui.imp.target;
+    if (t === "gps") return { gps: true };
+    const [region, block] = t.split("|");
+    const blk = player.regions[region].blocks[block];
+    return { region, block, blk, slots: blk.slots.map((s, k) => ({ k, name: s.name, bilateral: !!s.bilateral })).filter((s) => !C.isSpare(s.name)) };
+  }
+  // (re)parse when the pasted text changes, and take fresh guesses at the columns
+  function ensureParsed() {
+    const imp = ui.imp;
+    if (imp.parsedFrom === imp.text) return;
+    imp.parsedFrom = imp.text;
+    const P = X.parse(imp.text);
+    imp.P = P;
+    const T = importTarget();
+    const col = (k) => (imp.map[k] == null ? [] : P.rows.map((r) => r[imp.map[k]]));
+    if (T.gps) {
+      imp.map = X.guessGpsMap(P.headers);
+      imp.speedUnit = imp.map.top == null ? "ms" : X.guessSpeedUnit(P.headers[imp.map.top], col("top").map((v) => X.toNumber(v, P.delimiter)));
+      imp.combine = false;
+      imp.alterg = false;
+    } else {
+      const g = X.guessGpsMap(P.headers);
+      imp.map = { date: g.date, player: g.player, notes: g.notes };
+      imp.slots = {};
+      const sm = X.guessSlotMap(P.headers, T.slots);
+      T.slots.forEach((s) => { imp.slots[s.k] = { l: sm[s.k] ? sm[s.k].l : null, r: sm[s.k] && !s.bilateral ? sm[s.k].r : null }; });
+    }
+    imp.dateOrder = X.guessDateOrder(col("date"));
+    // pre-select this player's rows in multi-athlete exports
+    imp.playerVal = "";
+    if (imp.map.player != null) {
+      const me = (player.profile.name || "").trim().toLowerCase();
+      const names = Array.from(new Set(col("player").filter(Boolean)));
+      imp.playerVal = names.find((n) => n.toLowerCase() === me) || names.find((n) => me && me.split(/\s+/).every((w) => n.toLowerCase().indexOf(w) >= 0)) || "";
+    }
+  }
+  function buildImport() {
+    const imp = ui.imp, P = imp.P, T = importTarget(), mp = imp.map;
+    const out = [], skip = { date: 0, player: 0, dup: 0, empty: 0 };
+    const cell = (r, i) => (i == null || i === "" ? "" : r[i]);
+    const numAt = (r, i) => (i == null || i === "" ? null : X.toNumber(r[i], P.delimiter));
+    P.rows.forEach((r) => {
+      if (mp.player != null && imp.playerVal && cell(r, mp.player) !== imp.playerVal) { skip.player++; return; }
+      const date = X.toDate(cell(r, mp.date), imp.dateOrder);
+      if (!date) { skip.date++; return; }
+      if (T.gps) {
+        const s = { date, title: cell(r, mp.type), notes: cell(r, mp.notes) };
+        C.GPS_METRICS.forEach((m) => { s[m.key] = numAt(r, mp[m.key]); });
+        if (isNum(s.top) && imp.speedUnit === "kmh") s.top = Math.round((s.top / 3.6) * 100) / 100;
+        if (C.GPS_METRICS.every((m) => s[m.key] == null)) { skip.empty++; return; }
+        out.push(s);
+      } else {
+        const v = {};
+        T.slots.forEach((sl) => { const c = imp.slots[sl.k] || {}; v[sl.k] = [numAt(r, c.l), sl.bilateral ? null : numAt(r, c.r)]; });
+        if (Object.values(v).every((p) => p[0] == null && p[1] == null)) { skip.empty++; return; }
+        out.push({ date, vals: v, notes: cell(r, mp.notes) });
+      }
+    });
+    let rows = out;
+    if (T.gps && imp.combine) {
+      const by = {};
+      out.forEach((s) => {
+        const g = by[s.date];
+        if (!g) { by[s.date] = Object.assign({}, s); return; }
+        C.GPS_METRICS.forEach((m) => {
+          if (s[m.key] == null) return;
+          g[m.key] = g[m.key] == null ? s[m.key] : m.max ? Math.max(g[m.key], s[m.key]) : g[m.key] + s[m.key];
+        });
+        if (s.title && g.title.indexOf(s.title) < 0) g.title = g.title ? g.title + " + " + s.title : s.title;
+      });
+      rows = Object.values(by).sort((a, b) => (a.date < b.date ? -1 : 1));
+    }
+    if (T.gps) {
+      rows = rows.filter((s) => {
+        const dup = player.gps.sessions.some((e) => e.date === s.date && !!e.alterg === !!imp.alterg && e.td === s.td);
+        if (dup) skip.dup++;
+        return !dup;
+      });
+    }
+    return { rows, skip };
+  }
+  function renderImport() {
+    const imp = ui.imp;
+    ensureParsed();
+    const P = imp.P, T = importTarget();
+    const colOpts = [{ v: "", t: "— not in file —" }].concat(P.headers.map((h, i) => ({ v: i, t: h })));
+    const sel = (path, val, label) => inSel(path, val, colOpts, { kind: "selnum", label });
+    const head = `<div class="imp-src">
+        <label class="field grow"><span>Paste the export here (CSV or copied from Excel)</span>${inArea("@ui.imp.text", imp.text, { rows: 4, cls: "mono" })}</label>
+        <div class="imp-or">or</div>${btn("importCsvFile", "Choose CSV file…")}
+      </div>${imp.fileName ? `<p class="fine">Loaded <b>${esc(imp.fileName)}</b></p>` : ""}`;
+    if (!P.headers.length) {
+      return `<div class="imp-panel"><h3 class="sub-ttl">Import ${T.gps ? "GPS sessions" : "test results"} from CSV</h3>${head}
+        <p class="fine">${T.gps ? "Works with session exports from Catapult, STATSports and similar: one row per session (or per drill), with a date column." : "Works with exports from force plates and testing software: one row per test day, with a date column and a column per measure (left / right in separate columns)."} Nothing is uploaded — the file is read on this device.</p>
+        <div class="row-actions">${btn("cancelImport", "Cancel")}</div></div>`;
+    }
+    let mapping;
+    if (T.gps) {
+      mapping = `<div class="imp-grid">${X.GPS_FIELDS.map((f) => `<label class="field"><span>${esc(f.label)}${f.required ? " *" : ""}</span>${sel(`@ui.imp.map.${f.key}`, imp.map[f.key], f.label)}</label>`).join("")}
+        <label class="field"><span>Top speed units</span>${inSel("@ui.imp.speedUnit", imp.speedUnit, [{ v: "ms", t: "m/s" }, { v: "kmh", t: "km/h (convert to m/s)" }])}</label></div>
+        <div class="imp-opts"><label class="tick small">${inCheck("@ui.imp.combine", !!imp.combine)}<span>Combine rows on the same day into one session (exports with one row per drill)</span></label>
+        <label class="tick small">${inCheck("@ui.imp.alterg", !!imp.alterg)}<span>These are Alter-G sessions</span></label></div>`;
+    } else {
+      mapping = `<div class="imp-grid">
+          <label class="field"><span>Date *</span>${sel("@ui.imp.map.date", imp.map.date, "Date column")}</label>
+          <label class="field"><span>Player name</span>${sel("@ui.imp.map.player", imp.map.player, "Player column")}</label>
+          <label class="field"><span>Notes</span>${sel("@ui.imp.map.notes", imp.map.notes, "Notes column")}</label></div>
+        <div class="scroll"><table class="tbl entry imp-slots"><thead><tr><th>Test</th><th>L column (or score)</th><th>R column</th></tr></thead><tbody>
+        ${T.slots.map((sl) => `<tr><td class="b">${esc(sl.name)}</td><td>${sel(`@ui.imp.slots.${sl.k}.l`, (imp.slots[sl.k] || {}).l, `${sl.name} left`)}</td><td>${sl.bilateral ? `<span class="mute">— bilateral</span>` : sel(`@ui.imp.slots.${sl.k}.r`, (imp.slots[sl.k] || {}).r, `${sl.name} right`)}</td></tr>`).join("")}
+        </tbody></table></div>`;
+    }
+    const names = imp.map.player == null ? [] : Array.from(new Set(P.rows.map((r) => r[imp.map.player]).filter(Boolean))).sort();
+    const who = names.length ? `<label class="field"><span>Rows for player</span>${inSel("@ui.imp.playerVal", imp.playerVal, [{ v: "", t: `All rows (${names.length} names)` }].concat(names))}</label>` : "";
+    const dates = `<label class="field"><span>Dates in the file are</span>${inSel("@ui.imp.dateOrder", imp.dateOrder, [{ v: "dmy", t: "day/month/year (UK)" }, { v: "mdy", t: "month/day/year (US)" }])}</label>`;
+    const ok = imp.map.date != null;
+    const res = ok ? buildImport() : { rows: [], skip: {} };
+    const sk = res.skip;
+    const skipped = [sk.player ? `${sk.player} other players` : "", sk.date ? `${sk.date} without a readable date` : "", sk.empty ? `${sk.empty} with no values` : "", sk.dup ? `${sk.dup} already logged` : ""].filter(Boolean).join(", ");
+    let preview = "";
+    if (res.rows.length) {
+      const sample = res.rows.slice(0, 6);
+      preview = T.gps
+        ? `<table class="tbl"><thead><tr><th>Date</th><th>Title</th>${C.GPS_METRICS.map((m) => `<th class="c">${esc(m.label)}</th>`).join("")}</tr></thead><tbody>${sample.map((s) => `<tr><td>${esc(C.fmtDate(s.date, true))}</td><td>${esc(s.title)}</td>${C.GPS_METRICS.map((m) => `<td class="c">${esc(num(s[m.key]))}</td>`).join("")}</tr>`).join("")}</tbody></table>`
+        : `<table class="tbl"><thead><tr><th>Date</th>${T.slots.map((sl) => `<th class="c">${esc(sl.name)}</th>`).join("")}</tr></thead><tbody>${sample.map((r) => `<tr><td>${esc(C.fmtDate(r.date, true))}</td>${T.slots.map((sl) => `<td class="c">${esc([num(r.vals[sl.k][0]), num(r.vals[sl.k][1])].filter(Boolean).join(" / "))}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    }
+    const what = T.gps ? (imp.alterg ? "Alter-G session" : "session") : "test date";
+    return `<div class="imp-panel"><h3 class="sub-ttl">Import ${T.gps ? "GPS sessions" : "test results"} from CSV</h3>${head}
+      <p class="fine">Check the columns below — they're matched automatically from the headings. ${T.gps ? "Distances in metres; speeds converted to m/s." : "Rows for a date that's already in the table fill in that row rather than adding a new one."}</p>
+      <div class="imp-grid top">${dates}${who}</div>
+      ${mapping}
+      <div class="imp-sum ${ok && res.rows.length ? "" : "warn-box"}">${!ok ? "Pick the date column to continue." : res.rows.length ? `<b>${res.rows.length} ${what}${res.rows.length === 1 ? "" : "s"}</b> ready to import` : "Nothing to import with these settings"}${skipped ? ` · skipped ${esc(skipped)}` : ""}</div>
+      ${preview ? `<div class="scroll">${preview}</div>${res.rows.length > 6 ? `<p class="fine">…and ${res.rows.length - 6} more</p>` : ""}` : ""}
+      <div class="row-actions">${btn("cancelImport", "Cancel")}${res.rows.length ? btn("doImport", `Import ${res.rows.length} ${what}${res.rows.length === 1 ? "" : "s"}`, { cls: "primary" }) : ""}</div>
+    </div>`;
+  }
+  function applyImport() {
+    if (!ui.imp || !player) return;
+    ensureParsed();
+    const T = importTarget(), imp = ui.imp, res = buildImport();
+    if (!res.rows.length) return;
+    let added = 0, merged = 0;
+    if (T.gps) {
+      res.rows.forEach((r) => {
+        const s = C.newSession(r.date);
+        C.GPS_METRICS.forEach((m) => { s[m.key] = r[m.key]; });
+        s.alterg = !!imp.alterg;
+        const t = (r.title || "").toLowerCase();
+        const hit = SESSION_WORDS.find(([w]) => t.indexOf(w) >= 0);
+        s.type = imp.alterg ? "Rehab" : hit && lists.sessionTypes.indexOf(hit[1]) >= 0 ? hit[1] : "";
+        s.notes = [r.title, r.notes].filter(Boolean).join(" · ");
+        player.gps.sessions.push(s);
+        added++;
+      });
+      sortByDate(player.gps.sessions);
+    } else {
+      res.rows.forEach((r) => {
+        let row = T.blk.rows.find((x) => x.date === r.date);
+        if (row) merged++; else { row = C.newBlockRow(r.date); row.notes = r.notes || "Imported from CSV"; T.blk.rows.push(row); added++; }
+        Object.keys(r.vals).forEach((k) => {
+          const [l, rv] = r.vals[k];
+          if (l != null) row.vals[k][0] = l;
+          if (rv != null) row.vals[k][1] = rv;
+        });
+      });
+      sortByDate(T.blk.rows);
+    }
+    ui.imp = null;
+    touch(); renderNow();
+    toast(T.gps ? `Imported ${added} session${added === 1 ? "" : "s"}.` : `Imported ${added} new test date${added === 1 ? "" : "s"}${merged ? `, updated ${merged} existing` : ""}.`);
+  }
+  document.getElementById("csvInput").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file || !ui.imp) return;
+    const reader = new FileReader();
+    reader.onload = () => { ui.imp.text = String(reader.result || ""); ui.imp.fileName = file.name; renderNow(); };
+    reader.readAsText(file);
+  });
 
   // ================================================================== DOM morph (keeps focus, caret and scroll)
   function morphChildren(from, to) {
@@ -865,6 +1064,7 @@
       case "lines": v = el.value.split("\n").map((x) => x.trim()).filter(Boolean); break;
       default: v = el.value;
     }
+    if (path.indexOf("@ui.") === 0) { setPath(ui, path.slice(4), v); return true; }
     if (path.indexOf("@lists.") === 0) {
       const k = path.slice(7);
       lists[k] = v.length ? v : C.DEFAULT_LISTS[k].slice();
@@ -924,6 +1124,20 @@
         render();
       });
     },
+    archivePlayer(d) { setArchived(d.id, true, d.name); },
+    unarchivePlayer(d) { setArchived(d.id, false, d.name); },
+    archiveCurrent() { if (player) setArchived(player.id, true, player.profile.name || "this player"); },
+    unarchiveCurrent() { if (player) setArchived(player.id, false, player.profile.name || "this player"); },
+    toggleArchived() { ui.showArchived = !ui.showArchived; renderNow(); },
+    importCsv(d) {
+      ui.imp = { target: d.target, text: "", fileName: "", parsedFrom: null };
+      renderNow();
+      const el = document.querySelector(".imp-panel textarea");
+      if (el) el.scrollIntoView({ block: "center" });
+    },
+    importCsvFile() { document.getElementById("csvInput").click(); },
+    cancelImport() { ui.imp = null; renderNow(); },
+    doImport() { applyImport(); },
     deleteCurrent() {
       if (!player) return;
       const p = player;
@@ -1003,6 +1217,21 @@
       });
     },
   };
+
+  function setArchived(id, on, name) {
+    const doIt = () => {
+      const p = player && player.id === id ? player : store.load(id);
+      if (!p) return;
+      p.archivedOn = on ? C.todayIso() : "";
+      p.updated = Date.now();
+      store.save(p);
+      if (player && player.id === id) player.archivedOn = p.archivedOn;
+      toast(on ? `${name} archived. Find them under “Show archived players”.` : `${name} is back in the active players list.`);
+      renderNow();
+    };
+    if (on) confirmModal(`Archive ${name}?`, "They move to the archived list on the Players page (e.g. once they've returned to play). All their data is kept and you can restore them at any time.", "Archive", doIt);
+    else doIt();
+  }
 
   function focusLast(sel) {
     const el = document.querySelector(sel);
@@ -1112,6 +1341,7 @@
         player = store.load(route.id);
         ui.saveStatus = "";
         ui.editSlots = {};
+        ui.imp = null;
       }
       if (!player) { route = { page: "library" }; history.replaceState(null, "", "#/"); }
       else {

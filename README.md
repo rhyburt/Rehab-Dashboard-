@@ -24,6 +24,17 @@ The calculations reproduce the workbook's formulas. The worked example (Players 
 
 Small differences from the spreadsheet: there is no limit on how many test dates, sessions or status entries you can add. Rows can be added and deleted with buttons. Each test slot has a "bilateral" switch. Region-tab LSI colours use the dashboard's LSI target.
 
+## Archiving players
+
+When a player has returned to play, use **Archive** on their card (or **Archive player** at the bottom of their Dashboard). Archived players drop out of the main list but keep all their data. **Show archived players** lists them, and **Restore** puts them back, e.g. after a re-injury.
+
+## Importing from CSV
+
+- **GPS tab → Import CSV:** session exports from Catapult, STATSports and similar. The app finds the header row and matches columns such as date, player, total distance, HSR, sprint distance, accelerations, decelerations and max speed. It filters a squad export to this player, converts km/h to m/s, can combine one-row-per-drill exports into one session per day, can mark the rows as Alter-G, and skips sessions that are already logged.
+- **Region tab → each test block → Import CSV:** force-plate or testing-software exports. Columns are matched to the block's tests by name, with left and right read from headings such as "Left", "L" or "Right". A date that's already in the table fills in that row instead of adding a duplicate.
+
+Paste the data (straight from Excel works too) or choose a .csv file. The file is read on the device and never uploaded. Check the column matches and the preview before importing.
+
 ## Hosting on GitHub Pages
 
 1. In the repository go to **Settings → Pages**.
@@ -45,6 +56,7 @@ The app is cached for offline use. After changing any file, bump `CACHE` in `sw.
 index.html             page shell
 css/app.css            styles (Leeds United branding; cream = input, pale blue = calculated)
 js/calc.js             data model + all calculations (no DOM; mirrors the workbook formulas)
+js/csv.js              CSV parsing and column matching for imports
 js/app.js              user interface, storage, backup/restore, charts
 sw.js                  offline cache
 manifest.webmanifest   install / home-screen settings
