@@ -185,6 +185,53 @@
     return out;
   }
 
-  root.CSVImport = { parse, toNumber, toDate, guessDateOrder, GPS_FIELDS, guessGpsMap, guessSpeedUnit, guessSlotMap, norm };
+  // Performance metrics (e.g. Hawkin Dynamics): one row per trial, a test-type / tags column says which test it was
+  // (CMJ, iso squat, hip, ankle…), and several tests share the same column (e.g. "Peak Force(N)").
+  const TYPE_HEADERS = [["test", "type"], ["tags"], ["tag"], ["test"], ["test", "name"], ["protocol"], ["exercise"]];
+  const PREFIX = new Set(["iso", "isometric", "test", "cmj"]);
+  function guessPerfMap(headers, rows, metrics) {
+    const unbracket = (t) => String(t).replace(/\(([^)]*)\)/g, " ");
+    // every column that looks like a test type / tag column
+    const typeCols = [];
+    headers.forEach((h, i) => { if (headerScore(h, TYPE_HEADERS) > 0) typeCols.push(i); });
+    const values = typeCols.map((c) => ({ c, vals: Array.from(new Set(rows.map((r) => r[c]).filter(Boolean))) }));
+    const slots = {};
+    metrics.forEach((m) => {
+      if (!m.name || m.name.charAt(0) === "(") return;
+      const all = tokens(unbracket(m.name)).filter((w) => !UNIT_WORDS.has(w));
+      const words = all.filter((w) => !PREFIX.has(w));
+      const isCmj = all.indexOf("cmj") >= 0;
+      // which test-type / tag value belongs to this metric?
+      let type = "", typeCol = null, tBest = 0;
+      values.forEach(({ c, vals }) => vals.forEach((t) => {
+        const tt = tokens(t);
+        let sc = words.filter((w) => tt.indexOf(w) >= 0).length;
+        if (isCmj && (tt.indexOf("cmj") >= 0 || tt.indexOf("countermovement") >= 0)) sc += 2;
+        if (sc > tBest) { tBest = sc; type = t; typeCol = c; }
+      }));
+      if (tBest < 1) { type = ""; typeCol = null; }
+      const tt = type ? tokens(type) : [];
+      const rest = words.filter((w) => tt.indexOf(w) < 0);
+      // the measure column: every remaining word present, fewest extra words, prefer "propulsive"
+      let col = null, cBest = -Infinity;
+      headers.forEach((h, i) => {
+        if (typeCols.indexOf(i) >= 0) return;
+        const ht = tokens(unbracket(h)).map((w) => (w === "rel" ? "relative" : w));
+        if (!rest.length || !rest.every((w) => ht.indexOf(w) >= 0)) return;
+        const sc = 10 - (ht.length - rest.length) + (ht.indexOf("propulsive") >= 0 ? 0.5 : 0) - (ht.indexOf("braking") >= 0 ? 1 : 0);
+        if (sc > cBest) { cBest = sc; col = i; }
+      });
+      // jump height exported in metres but logged in cm
+      let scale = 1;
+      if (col != null && /\(cm\)/i.test(m.name)) {
+        const vals = rows.map((r) => toNumber(r[col])).filter((v) => v != null);
+        if (/\(m\)/.test(String(headers[col]).toLowerCase()) || (vals.length && Math.max(...vals) < 1.5)) scale = 100;
+      }
+      slots[m.k] = { col, typeCol, type, scale };
+    });
+    return { typeCols, slots };
+  }
+
+  root.CSVImport = { parse, toNumber, toDate, guessDateOrder, GPS_FIELDS, guessGpsMap, guessSpeedUnit, guessSlotMap, guessPerfMap, norm };
   if (typeof module !== "undefined" && module.exports) module.exports = root.CSVImport;
 })(typeof window !== "undefined" ? window : globalThis);

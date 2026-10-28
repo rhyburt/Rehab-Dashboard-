@@ -232,6 +232,7 @@
       profile: { name: "", position: "", injury: "", side: "", injuryDate: "", rtpDate: "", dob: "" },
       growth: [],
       wellness: [],
+      perf: newPerf(),
       settings: { ticks: {}, lsiTarget: 0.9, chartRegion: "", chartSlot: {} },
       statusLog: [],
       regions,
@@ -253,6 +254,14 @@
     { key: "activity", label: "Pain during activity" },
     { key: "morning", label: "Pain next morning (24 h)" },
   ];
+  // Performance testing (Athlete Profile): e.g. Hawkin CMJ and isometrics, compared with pre-injury values
+  const PERF_SLOTS = 10;
+  const PERF_DEFAULTS = ["CMJ Jump Height (cm)", "CMJ mRSI", "CMJ Relative Peak Power (W/kg)", "Iso Squat Peak Force (N)",
+    "Iso Squat Relative Force (N/kg)", "Hip Adduction Iso Peak Force (N)", "Hip Abduction Iso Peak Force (N)", "Ankle Iso Peak Force (N)"];
+  function newPerf() {
+    return { metrics: PERF_DEFAULTS.concat(Array(PERF_SLOTS).fill(SPARE)).slice(0, PERF_SLOTS).map((n) => ({ name: n, base: null })), rows: [] };
+  }
+  function newPerfRow(date) { return { id: uid("f"), date: date || "", vals: Array(PERF_SLOTS).fill(null), notes: "" }; }
   function newWellnessRow(date) { return { id: uid("w"), date: date || "", rest: null, activity: null, morning: null, notes: "" }; }
   function newStatusRow(date, prev) {
     const addons = {};
@@ -278,6 +287,18 @@
     p.updated = raw.updated || p.updated;
     p.archivedOn = typeof raw.archivedOn === "string" ? raw.archivedOn : "";
     Object.keys(p.profile).forEach((k) => { if (raw.profile && raw.profile[k] !== undefined) p.profile[k] = raw.profile[k]; });
+    if (raw.perf && typeof raw.perf === "object") {
+      if (Array.isArray(raw.perf.metrics)) raw.perf.metrics.slice(0, PERF_SLOTS).forEach((m, i) => {
+        if (m && typeof m === "object") p.perf.metrics[i] = { name: str(m.name), base: isNum(m.base) ? m.base : null };
+      });
+      if (Array.isArray(raw.perf.rows)) p.perf.rows = raw.perf.rows.map((r) => {
+        const row = newPerfRow(r.date);
+        row.id = r.id || row.id;
+        row.notes = str(r.notes);
+        (r.vals || []).slice(0, PERF_SLOTS).forEach((v, k) => { row.vals[k] = isNum(v) ? v : null; });
+        return row;
+      });
+    }
     if (Array.isArray(raw.wellness)) {
       p.wellness = raw.wellness.map((w) => {
         const row = newWellnessRow(w.date);
@@ -402,6 +423,14 @@
     knee.str.slots[0].pain = true;
     knee.str.rows[0].nrs[0] = 3;
     knee.str.rows[1].nrs[0] = 1;
+    // performance testing: pre-season (pre-injury) and two tests during rehab
+    [["2026-07-20", [38.5, 0.52, 58.1, 2650, 46.0, 410, 395, 1720]], ["2026-09-28", [null, null, null, 1980, 34.4, 330, 340, 1310]],
+      ["2026-10-19", [29.0, 0.38, 47.5, 2240, 38.5, 365, 372, 1455]]].forEach(([date, vals]) => {
+      const r = newPerfRow(date);
+      vals.forEach((v, k) => { r.vals[k] = v; });
+      r.notes = NOTE;
+      p.perf.rows.push(r);
+    });
     // wellness log: symptoms settling over the first 11 weeks
     [["2026-08-12", 4, 6, 5], ["2026-08-19", 3, 5, 5], ["2026-08-26", 3, 5, 4], ["2026-09-02", 2, 4, 3], ["2026-09-09", 2, 4, 4],
       ["2026-09-16", 1, 3, 3], ["2026-09-23", 1, 3, 2], ["2026-09-30", 1, 2, 2], ["2026-10-07", 0, 3, 2], ["2026-10-14", 0, 2, 1],
@@ -737,6 +766,32 @@
     return { measures, count: dated.length, lastDate: dated.length ? dated[dated.length - 1].d : null };
   }
 
+  // per metric: pre-injury (typed, else the last test dated before injury), latest, best since injury, % of pre-injury
+  function calcPerf(player) {
+    const inj = dnum(player.profile.injuryDate), P = player.perf;
+    const rows = P.rows.map((r, i) => ({ r, i, d: dnum(r.date), wk: weekOf(r.date, player.profile.injuryDate) }));
+    const dated = rows.filter((x) => x.d != null).sort((a, b) => a.d - b.d || a.i - b.i);
+    const metrics = P.metrics.map((m, k) => {
+      const pts = dated.filter((x) => isNum(x.r.vals[k]));
+      const pre = inj == null ? [] : pts.filter((x) => x.d < inj);
+      const post = inj == null ? pts : pts.filter((x) => x.d >= inj);
+      const base = isNum(m.base) ? m.base : pre.length ? pre[pre.length - 1].r.vals[k] : null;
+      const baseFrom = isNum(m.base) ? "entered" : pre.length ? pre[pre.length - 1].d : null;
+      const last = post.length ? post[post.length - 1] : null, prev = post.length > 1 ? post[post.length - 2] : null;
+      const latest = last ? last.r.vals[k] : null;
+      const best = post.length ? Math.max.apply(null, post.map((x) => x.r.vals[k])) : null;
+      const pctOf = (v) => (isNum(base) && base !== 0 && isNum(v) ? v / base : null);
+      return {
+        k, name: m.name, inUse: !isSpare(m.name), base, baseFrom, latest, latestDate: last ? last.d : null,
+        best, pct: pctOf(latest), bestPct: pctOf(best),
+        delta: last && prev ? latest - prev.r.vals[k] : null,
+        pctPoints: post.filter((x) => x.wk != null && x.wk >= 0).map((x) => [x.wk, pctOf(x.r.vals[k]), fmtDate(x.d)]).filter((p) => p[1] != null),
+        rawPoints: post.filter((x) => x.wk != null && x.wk >= 0).map((x) => [x.wk, x.r.vals[k], fmtDate(x.d)]),
+      };
+    });
+    return { metrics, rows: Object.fromEntries(rows.map((x) => [x.i, x])) };
+  }
+
   function calcPlayer(player) {
     const pr = player.profile, today = todayNum();
     const growth = calcGrowth(player);
@@ -757,6 +812,7 @@
       maturity: growth.maturity,
       growth,
       wellness: calcWellness(player),
+      perf: calcPerf(player),
     };
   }
 
@@ -785,7 +841,7 @@
     regionTitle, blockTitle, isNum, isSpare, isGpsTest, isManual, uid,
     dnum, todayNum, todayIso, setToday, isoFromNum, fmtDate, weekOf,
     fmtInt, fmt1, fmtPct, fmtNum, fmtSigned,
-    newPlayer, newRegion, newBlockRow, newStatusRow, newSession, newGrowthRow, calcGrowth, newWellnessRow, calcWellness, WELLNESS, normalizePlayer, examplePlayer,
+    newPlayer, newRegion, newBlockRow, newStatusRow, newSession, newGrowthRow, calcGrowth, newWellnessRow, calcWellness, WELLNESS, newPerfRow, calcPerf, PERF_SLOTS, normalizePlayer, examplePlayer,
     lsi, calcBlock, calcGps, calcRegion, calcStatus, calcPlayer, headline, maturity, lsiSeries, slotSeries,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Calc;

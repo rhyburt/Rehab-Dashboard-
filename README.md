@@ -25,6 +25,10 @@ The calculations reproduce the workbook's formulas. The worked example (Players 
 
 Small differences from the spreadsheet: there is no limit on how many test dates, sessions or status entries you can add. Rows can be added and deleted with buttons. Each test slot has a "bilateral" switch. Region-tab LSI colours use the dashboard's LSI target.
 
+## Performance testing (Athlete Profile)
+
+At the bottom of the Athlete Profile tab you can log performance tests such as Hawkin CMJ (jump height, mRSI, relative peak power) and isometrics (squat, hip adduction and abduction, ankle). Rename the ten metric slots under **Edit metrics**. Each metric is compared with its **pre-injury value**, which you can type in or leave blank to use the last test dated before the injury. You get a summary table (latest, % of pre-injury, change, best since injury) plus charts. **Import CSV (Hawkin)** reads Hawkin exports: one row per trial (best or average per day), the Test Type / Tags column to tell the isometrics apart, and jump height in metres converted to cm.
+
 ## Pain scores on tests
 
 In any test block, **Edit tests → Record pain (NRS)** adds a 0–10 symptom-response column to that test only. Scores are colour-coded (0–2 green, 3–5 amber, 6+ red), and the latest one appears as a small badge in the Dashboard's latest-tests list.

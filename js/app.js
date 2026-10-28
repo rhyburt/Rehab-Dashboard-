@@ -635,7 +635,56 @@
     </section>`;
     return `<div class="pg-head"><h1>Athlete Profile — growth & maturation</h1>
       <p class="fine">Log height, sitting height, body mass and predicted adult height whenever you measure. % PAH, maturity status and growth rate are calculated, and the latest values appear on the Dashboard.</p></div>
-      ${summary}${log}${charts}`;
+      ${summary}${log}${charts}${renderPerf(calc)}`;
+  }
+
+  // performance testing (Hawkin CMJ, isometrics…) against pre-injury values
+  function renderPerf(calc) {
+    const p = player, P = p.perf, pc = calc.perf, inj = p.profile.injuryDate;
+    const used = pc.metrics.filter((m) => m.inUse || P.rows.some((r) => isNum(r.vals[m.k])));
+    const editing = !!ui.editSlots.perf;
+    const pctCls = (v) => ratioClass(v, 1, 0.9);
+    const editor = editing ? `<div class="slot-ed">
+        <p class="fine">Name the metrics you test (rename a spare to add one; clear a name to retire it — data is kept). Pre-injury value: type it, or leave blank to use the last test dated before the injury.</p>
+        <div class="slot-grid">${P.metrics.map((m, k) => `<div class="slot-row perf-row"><span class="mute">${k + 1}</span>
+          ${inText(`perf.metrics.${k}.name`, C.isSpare(m.name) ? "" : m.name, { ph: C.SPARE, label: `Metric ${k + 1}` })}
+          ${inNum(`perf.metrics.${k}.base`, m.base, { ph: "pre-injury", label: `Metric ${k + 1} pre-injury value` })}</div>`).join("")}</div>
+      </div>` : "";
+    const summary = used.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Metric</th><th class="c">Pre-injury</th><th class="c">Latest</th><th class="c">Date</th><th class="c">% of pre-injury</th><th class="c">Δ prev</th><th class="c">Best since injury</th></tr></thead><tbody>
+      ${used.map((m) => `<tr><td class="b">${esc(m.name)}</td>
+        <td class="c">${esc(num(m.base))}${m.baseFrom != null && m.baseFrom !== "entered" ? ` <span class="thint">(${esc(C.fmtDate(m.baseFrom))})</span>` : ""}</td>
+        <td class="c b">${esc(num(m.latest))}</td><td class="c mute">${esc(C.fmtDate(m.latestDate))}</td>
+        <td class="c b ${pctCls(m.pct)}">${esc(C.fmtPct(m.pct))}</td>
+        <td class="c ${m.delta > 0 ? "up" : m.delta < 0 ? "down" : ""}">${m.delta == null ? "" : esc((m.delta > 0 ? "+" : "") + C.fmtNum(Math.round(m.delta * 100) / 100))}</td>
+        <td class="c">${esc(num(m.best))}${m.bestPct != null ? ` <span class="thint">(${esc(C.fmtPct(m.bestPct))})</span>` : ""}</td></tr>`).join("")}</tbody></table></div>` : `<p class="fine">No metrics set up — use “Edit metrics”.</p>`;
+    const rows = P.rows.map((r, i) => {
+      const x = pc.rows[i], pre = x && x.wk != null && x.wk < 1;
+      return `<tr data-key="${esc(r.id)}" class="${pre ? "pre-row" : ""}"><td>${inDate(`perf.rows.${i}.date`, r.date, { label: "Test date" })}</td>
+        <td class="calc c">${pre ? `<span class="thint">pre-injury</span>` : x && x.wk != null ? x.wk : ""}</td>
+        ${used.map((m) => `<td>${inNum(`perf.rows.${i}.vals.${m.k}`, r.vals[m.k], { label: m.name })}</td>`).join("")}
+        <td>${inText(`perf.rows.${i}.notes`, r.notes, { cls: "notes", label: "Notes" })}</td>
+        <td>${btn("delRow", "✕", { cls: "x", data: { path: "perf.rows", idx: i }, title: "Delete test date" })}</td></tr>`;
+    }).join("");
+    const table = rows ? `<div class="scroll" data-scroll="perf"><table class="tbl entry"><thead><tr><th>Date</th><th class="c">Wk</th>${used.map((m) => `<th class="c slot-h">${esc(m.name)}</th>`).join("")}<th>Notes</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : `<p class="fine">No tests logged yet. Add a test date, or import a Hawkin export — include tests from before the injury so the pre-injury values fill in automatically.</p>`;
+    const inUse = pc.metrics.filter((m) => m.inUse);
+    let k = p.settings.chartSlot.perf;
+    if (!isNum(k) || !inUse.some((m) => m.k === k)) k = inUse.length ? inUse[0].k : 0;
+    const sm = pc.metrics[k];
+    const selMetric = inUse.length ? inSel("settings.chartSlot.perf", k, inUse.map((m) => ({ v: m.k, t: m.name })), { kind: "selnum", cls: "chart-sel", label: "Metric to chart" }) : "";
+    const charts = `<div class="charts">
+        ${chart({ title: "% of pre-injury by rehab week", kind: "pct", yMin: 0.4, target: 1, targetLabel: "pre-injury (100%)", series: inUse.map((m) => ({ name: m.name, points: m.pctPoints })).filter((x) => x.points.length), empty: inj ? "Needs a pre-injury value and a test during rehab" : "Set the injury date on the Dashboard" })}
+        ${inUse.length ? chart({ titleHtml: selMetric, title: sm.name, kind: "dec", target: isNum(sm.base) ? sm.base : null, targetLabel: isNum(sm.base) ? `pre-injury ${C.fmtNum(sm.base)}` : "", series: [{ name: sm.name, points: sm.rawPoints }], empty: "No tests during rehab for this metric yet" }) : ""}
+      </div>`;
+    return `<section class="card">
+      <div class="card-head"><h2 class="ttl">Performance testing <span class="ttl-hint">— current vs pre-injury</span></h2>
+        <div class="row-actions">${btn("toggleSlots", editing ? "Done" : "Edit metrics", { data: { key: "perf" } })}${btn("importCsv", "Import CSV (Hawkin)", { data: { target: "perf" } })}${btn("addPerf", "+ Add test date", { cls: "primary" })}</div></div>
+      ${ui.imp && ui.imp.target === "perf" ? renderImport() : ""}${editor}
+      ${summary}
+      ${charts}
+      <h3 class="sub-ttl">Test log</h3>${table}
+      <p class="fine">% of pre-injury: 100%+ green · 90–99% amber · below 90% red. Rows dated before the injury are the pre-injury tests.</p>
+    </section>`;
   }
 
   // ================================================================== status log
@@ -860,6 +909,7 @@
   function importTarget() {
     const t = ui.imp.target;
     if (t === "gps") return { gps: true };
+    if (t === "perf") return { perf: true, slots: player.perf.metrics.map((m, k) => ({ k, name: m.name })).filter((m) => !C.isSpare(m.name)) };
     const [region, block] = t.split("|");
     const blk = player.regions[region].blocks[block];
     return { region, block, blk, slots: blk.slots.map((s, k) => ({ k, name: s.name, bilateral: !!s.bilateral })).filter((s) => !C.isSpare(s.name)) };
@@ -878,6 +928,11 @@
       imp.speedUnit = imp.map.top == null ? "ms" : X.guessSpeedUnit(P.headers[imp.map.top], col("top").map((v) => X.toNumber(v, P.delimiter)));
       imp.combine = false;
       imp.alterg = false;
+    } else if (T.perf) {
+      const g = X.guessGpsMap(P.headers);
+      imp.map = { date: g.date, player: g.player, notes: g.notes };
+      imp.slots = X.guessPerfMap(P.headers, P.rows, T.slots).slots;
+      imp.agg = "best";
     } else {
       const g = X.guessGpsMap(P.headers);
       imp.map = { date: g.date, player: g.player, notes: g.notes };
@@ -909,6 +964,16 @@
         if (isNum(s.top) && imp.speedUnit === "kmh") s.top = Math.round((s.top / 3.6) * 100) / 100;
         if (C.GPS_METRICS.every((m) => s[m.key] == null)) { skip.empty++; return; }
         out.push(s);
+      } else if (T.perf) {
+        const v = {};
+        T.slots.forEach((sl) => {
+          const c = imp.slots[sl.k] || {};
+          if (c.typeCol != null && c.typeCol !== "" && c.type && cell(r, c.typeCol) !== c.type) return;
+          const n = numAt(r, c.col);
+          if (n != null) v[sl.k] = Math.round(n * (Number(c.scale) || 1) * 1000) / 1000;
+        });
+        if (!Object.keys(v).length) { skip.empty++; return; }
+        out.push({ date, vals: v, notes: cell(r, mp.notes) });
       } else {
         const v = {};
         T.slots.forEach((sl) => { const c = imp.slots[sl.k] || {}; v[sl.k] = [numAt(r, c.l), sl.bilateral ? null : numAt(r, c.r)]; });
@@ -930,6 +995,22 @@
       });
       rows = Object.values(by).sort((a, b) => (a.date < b.date ? -1 : 1));
     }
+    if (T.perf) {
+      // one row per day: several trials -> best (highest) or average
+      const by = {};
+      out.forEach((r) => {
+        const g = by[r.date] || (by[r.date] = { date: r.date, lists: {}, notes: r.notes });
+        Object.keys(r.vals).forEach((k) => { (g.lists[k] = g.lists[k] || []).push(r.vals[k]); });
+      });
+      rows = Object.values(by).sort((a, b) => (a.date < b.date ? -1 : 1)).map((g) => {
+        const vals = {};
+        Object.keys(g.lists).forEach((k) => {
+          const L = g.lists[k];
+          vals[k] = imp.agg === "avg" ? Math.round((L.reduce((a, b) => a + b, 0) / L.length) * 1000) / 1000 : Math.max.apply(null, L);
+        });
+        return { date: g.date, vals, notes: g.notes, trials: Math.max(...Object.values(g.lists).map((L) => L.length)) };
+      });
+    }
     if (T.gps) {
       rows = rows.filter((s) => {
         const dup = player.gps.sessions.some((e) => e.date === s.date && !!e.alterg === !!imp.alterg && e.td === s.td);
@@ -950,12 +1031,26 @@
         <div class="imp-or">or</div>${btn("importCsvFile", "Choose CSV file…")}
       </div>${imp.fileName ? `<p class="fine">Loaded <b>${esc(imp.fileName)}</b></p>` : ""}`;
     if (!P.headers.length) {
-      return `<div class="imp-panel"><h3 class="sub-ttl">Import ${T.gps ? "GPS sessions" : "test results"} from CSV</h3>${head}
-        <p class="fine">${T.gps ? "Works with session exports from Catapult, STATSports and similar: one row per session (or per drill), with a date column." : "Works with exports from force plates and testing software: one row per test day, with a date column and a column per measure (left / right in separate columns)."} Nothing is uploaded — the file is read on this device.</p>
+      return `<div class="imp-panel"><h3 class="sub-ttl">Import ${T.gps ? "GPS sessions" : T.perf ? "performance tests" : "test results"} from CSV</h3>${head}
+        <p class="fine">${T.perf ? "Works with Hawkin Dynamics exports (and other force-plate / dynamometer software): export the player's tests as CSV and paste or choose the file." : T.gps ? "Works with session exports from Catapult, STATSports and similar: one row per session (or per drill), with a date column." : "Works with exports from force plates and testing software: one row per test day, with a date column and a column per measure (left / right in separate columns)."} Nothing is uploaded — the file is read on this device.</p>
         <div class="row-actions">${btn("cancelImport", "Cancel")}</div></div>`;
     }
     let mapping;
-    if (T.gps) {
+    if (T.perf) {
+      const valOpts = (c) => (c == null || c === "" ? [] : Array.from(new Set(P.rows.map((r) => r[c]).filter(Boolean))).sort());
+      mapping = `<div class="imp-grid">
+          <label class="field"><span>Date *</span>${sel("@ui.imp.map.date", imp.map.date, "Date column")}</label>
+          <label class="field"><span>Player name</span>${sel("@ui.imp.map.player", imp.map.player, "Player column")}</label>
+          <label class="field"><span>Several trials on one day</span>${inSel("@ui.imp.agg", imp.agg, [{ v: "best", t: "Keep the best" }, { v: "avg", t: "Average them" }])}</label></div>
+        <div class="scroll"><table class="tbl entry imp-slots"><thead><tr><th>Metric</th><th>Column</th><th>Only rows where…</th><th>…is</th><th>Units</th></tr></thead><tbody>
+        ${T.slots.map((sl) => {
+          const c = imp.slots[sl.k] || {}, b = `@ui.imp.slots.${sl.k}`;
+          return `<tr><td class="b">${esc(sl.name)}</td><td>${sel(`${b}.col`, c.col, `${sl.name} column`)}</td>
+            <td>${inSel(`${b}.typeCol`, c.typeCol, [{ v: "", t: "— any row —" }].concat(P.headers.map((h, i) => ({ v: i, t: h }))), { kind: "selnum", label: `${sl.name} filter column` })}</td>
+            <td>${c.typeCol == null || c.typeCol === "" ? `<span class="mute">—</span>` : inSel(`${b}.type`, c.type || "", [{ v: "", t: "any value" }].concat(valOpts(c.typeCol)), { label: `${sl.name} filter value` })}</td>
+            <td>${inSel(`${b}.scale`, String(c.scale || 1), [{ v: "1", t: "as exported" }, { v: "100", t: "m → cm (×100)" }], { label: `${sl.name} units` })}</td></tr>`;
+        }).join("")}</tbody></table></div>`;
+    } else if (T.gps) {
       mapping = `<div class="imp-grid">${X.GPS_FIELDS.map((f) => `<label class="field"><span>${esc(f.label)}${f.required ? " *" : ""}</span>${sel(`@ui.imp.map.${f.key}`, imp.map[f.key], f.label)}</label>`).join("")}
         <label class="field"><span>Top speed units</span>${inSel("@ui.imp.speedUnit", imp.speedUnit, [{ v: "ms", t: "m/s" }, { v: "kmh", t: "km/h (convert to m/s)" }])}</label></div>
         <div class="imp-opts"><label class="tick small">${inCheck("@ui.imp.combine", !!imp.combine)}<span>Combine rows on the same day into one session (exports with one row per drill)</span></label>
@@ -981,11 +1076,12 @@
       const sample = res.rows.slice(0, 6);
       preview = T.gps
         ? `<table class="tbl"><thead><tr><th>Date</th><th>Title</th>${C.GPS_METRICS.map((m) => `<th class="c">${esc(m.label)}</th>`).join("")}</tr></thead><tbody>${sample.map((s) => `<tr><td>${esc(C.fmtDate(s.date, true))}</td><td>${esc(s.title)}</td>${C.GPS_METRICS.map((m) => `<td class="c">${esc(num(s[m.key]))}</td>`).join("")}</tr>`).join("")}</tbody></table>`
+        : T.perf ? `<table class="tbl"><thead><tr><th>Date</th>${T.slots.map((sl) => `<th class="c">${esc(sl.name)}</th>`).join("")}</tr></thead><tbody>${sample.map((r) => `<tr><td>${esc(C.fmtDate(r.date, true))}</td>${T.slots.map((sl) => `<td class="c">${esc(num(r.vals[sl.k]))}</td>`).join("")}</tr>`).join("")}</tbody></table>`
         : `<table class="tbl"><thead><tr><th>Date</th>${T.slots.map((sl) => `<th class="c">${esc(sl.name)}</th>`).join("")}</tr></thead><tbody>${sample.map((r) => `<tr><td>${esc(C.fmtDate(r.date, true))}</td>${T.slots.map((sl) => `<td class="c">${esc([num(r.vals[sl.k][0]), num(r.vals[sl.k][1])].filter(Boolean).join(" / "))}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
     }
     const what = T.gps ? (imp.alterg ? "Alter-G session" : "session") : "test date";
-    return `<div class="imp-panel"><h3 class="sub-ttl">Import ${T.gps ? "GPS sessions" : "test results"} from CSV</h3>${head}
-      <p class="fine">Check the columns below — they're matched automatically from the headings. ${T.gps ? "Distances in metres; speeds converted to m/s." : "Rows for a date that's already in the table fill in that row rather than adding a new one."}</p>
+    return `<div class="imp-panel"><h3 class="sub-ttl">Import ${T.gps ? "GPS sessions" : T.perf ? "performance tests" : "test results"} from CSV</h3>${head}
+      <p class="fine">Check the columns below — they're matched automatically from the headings. ${T.gps ? "Distances in metres; speeds converted to m/s." : T.perf ? "Hawkin exports list each trial on its own row and say which test it was in the Test Type or Tags column — pick that under “Only rows where…”. Tests dated before the injury become the pre-injury values. A date that's already logged is filled in, not duplicated." : "Rows for a date that's already in the table fill in that row rather than adding a new one."}</p>
       <div class="imp-grid top">${dates}${who}</div>
       ${mapping}
       <div class="imp-sum ${ok && res.rows.length ? "" : "warn-box"}">${!ok ? "Pick the date column to continue." : res.rows.length ? `<b>${res.rows.length} ${what}${res.rows.length === 1 ? "" : "s"}</b> ready to import` : "Nothing to import with these settings"}${skipped ? ` · skipped ${esc(skipped)}` : ""}</div>
@@ -1012,6 +1108,13 @@
         added++;
       });
       sortByDate(player.gps.sessions);
+    } else if (T.perf) {
+      res.rows.forEach((r) => {
+        let row = player.perf.rows.find((x) => x.date === r.date);
+        if (row) merged++; else { row = C.newPerfRow(r.date); row.notes = r.notes || "Imported from CSV"; player.perf.rows.push(row); added++; }
+        Object.keys(r.vals).forEach((k) => { row.vals[k] = r.vals[k]; });
+      });
+      sortByDate(player.perf.rows);
     } else {
       res.rows.forEach((r) => {
         let row = T.blk.rows.find((x) => x.date === r.date);
@@ -1136,7 +1239,7 @@
       return true;
     }
     if (!player) return false;
-    if (/\.slots\.\d+\.name$/.test(path) && String(v).trim() === "") v = C.SPARE;
+    if (/\.(slots|metrics)\.\d+\.name$/.test(path) && String(v).trim() === "") v = C.SPARE;
     setPath(player, path, v);
     touch();
     return true;
@@ -1237,6 +1340,11 @@
       log.push(C.newStatusRow(C.todayIso(), prev));
       touch(); renderNow();
       focusLast(`[data-scroll="status"] tbody tr:last-child input[type=date]`);
+    },
+    addPerf() {
+      player.perf.rows.push(C.newPerfRow(C.todayIso()));
+      touch(); renderNow();
+      focusLast(`[data-scroll="perf"] tbody tr:last-child input[type=date]`);
     },
     addWellness() {
       player.wellness.push(C.newWellnessRow(C.todayIso()));
@@ -1418,7 +1526,7 @@
         const reg = regionFromTab(route.tab);
         if (reg) C.BLOCKS.forEach((b) => sortByDate(player.regions[reg].blocks[b.key].rows));
         if (route.tab === "status") sortByDate(player.statusLog);
-        if (route.tab === "profile") sortByDate(player.growth);
+        if (route.tab === "profile") { sortByDate(player.growth); sortByDate(player.perf.rows); }
         if (route.tab === "wellness") sortByDate(player.wellness);
         if (route.tab === "gps") sortByDate(player.gps.sessions);
       }

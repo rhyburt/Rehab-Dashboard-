@@ -451,3 +451,8 @@ input[type=checkbox]:focus-visible { outline: 2px solid var(--blue-2); outline-o
 .card.slim { padding-bottom: 8px; }
 .card.slim .card-head { margin-bottom: 4px; }
 .sym-ch { display: flex; flex-direction: column; margin-left: 8px; line-height: 1.35; }
+
+/* performance testing */
+.perf-row { grid-template-columns: 18px 1fr 110px; }
+.tbl tr.pre-row td { background: #F4F5F8; }
+.tbl tr.pre-row td.calc { background: #ECEEF3; }
