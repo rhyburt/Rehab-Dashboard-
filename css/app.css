@@ -432,3 +432,22 @@ input[type=checkbox]:focus-visible { outline: 2px solid var(--blue-2); outline-o
 .imp-slots select.in { min-width: 220px; }
 .imp-sum { background: var(--good-bg); color: var(--good); border-radius: 8px; padding: 8px 12px; margin: 10px 0; font-size: 13px; }
 .imp-sum.warn-box { background: var(--warn-bg); color: var(--warn); }
+
+/* pain / NRS */
+.nrs { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 10px; font-size: 11px; font-weight: 800; text-align: center; background: var(--line-2); color: var(--ink-2); }
+.nrs.big { font-size: 22px; min-width: 42px; padding: 4px 10px; border-radius: 8px; }
+.tbl .in.nrs-in { width: 56px; font-weight: 700; }
+.tbl th.nrs-h { background: #E8E2F2; color: #4B3A74; }
+.tbl td.nrs-cell { background: #F6F3FB; }
+.syms { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 6px; }
+.sym { display: flex; flex-direction: column; gap: 4px; background: var(--pale); border-radius: 8px; padding: 10px 12px; }
+.sym-v { display: flex; align-items: baseline; gap: 6px; }
+.sym-of { color: var(--mute); font-weight: 700; }
+.sym-wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 18px; align-items: center; }
+.sym-wrap .syms { grid-template-columns: 1fr; }
+.sym-chart .chart { margin-top: 0; }
+@media (max-width: 760px) { .sym-wrap { grid-template-columns: 1fr; } .sym-wrap .syms { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); } }
+.charts.one { grid-template-columns: 1fr; }
+.card.slim { padding-bottom: 8px; }
+.card.slim .card-head { margin-bottom: 4px; }
+.sym-ch { display: flex; flex-direction: column; margin-left: 8px; line-height: 1.35; }

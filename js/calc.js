@@ -215,7 +215,7 @@
       rows.forEach((c) => criteria.push(c ? Object.assign(blankCriterion(), c) : blankCriterion()));
     }
     const slots = (names) => names.concat(Array(SLOTS).fill(SPARE)).slice(0, SLOTS)
-      .map((n) => ({ name: n, bilateral: BILATERAL.indexOf(n) >= 0 }));
+      .map((n) => ({ name: n, bilateral: BILATERAL.indexOf(n) >= 0, pain: false }));
     return {
       phases: (spec.phases || PHASES).slice(),
       criteria,
@@ -231,6 +231,7 @@
       id: uid("p"), schema: 1, created: now, updated: now, archivedOn: "",
       profile: { name: "", position: "", injury: "", side: "", injuryDate: "", rtpDate: "", dob: "" },
       growth: [],
+      wellness: [],
       settings: { ticks: {}, lsiTarget: 0.9, chartRegion: "", chartSlot: {} },
       statusLog: [],
       regions,
@@ -242,7 +243,17 @@
     };
   }
 
-  function newBlockRow(date) { return { id: uid("t"), date: date || "", notes: "", vals: Array.from({ length: SLOTS }, () => [null, null]) }; }
+  // nrs[k] = symptom response (0–10 NRS) for slot k, used only on tests with "Record pain" switched on
+  function newBlockRow(date) {
+    return { id: uid("t"), date: date || "", notes: "", vals: Array.from({ length: SLOTS }, () => [null, null]), nrs: Array(SLOTS).fill(null) };
+  }
+  // Wellness log: 0–10 NRS pain at rest, during activity and the next morning (24 h response)
+  const WELLNESS = [
+    { key: "rest", label: "Pain at rest" },
+    { key: "activity", label: "Pain during activity" },
+    { key: "morning", label: "Pain next morning (24 h)" },
+  ];
+  function newWellnessRow(date) { return { id: uid("w"), date: date || "", rest: null, activity: null, morning: null, notes: "" }; }
   function newStatusRow(date, prev) {
     const addons = {};
     ADDONS.forEach((a) => { addons[a.key] = !!(prev && prev.addons && prev.addons[a.key]); });
@@ -267,6 +278,15 @@
     p.updated = raw.updated || p.updated;
     p.archivedOn = typeof raw.archivedOn === "string" ? raw.archivedOn : "";
     Object.keys(p.profile).forEach((k) => { if (raw.profile && raw.profile[k] !== undefined) p.profile[k] = raw.profile[k]; });
+    if (Array.isArray(raw.wellness)) {
+      p.wellness = raw.wellness.map((w) => {
+        const row = newWellnessRow(w.date);
+        row.id = w.id || row.id;
+        row.notes = str(w.notes);
+        WELLNESS.forEach((m) => { row[m.key] = isNum(w[m.key]) ? w[m.key] : null; });
+        return row;
+      });
+    }
     if (Array.isArray(raw.growth)) {
       p.growth = raw.growth.map((g) => {
         const row = newGrowthRow(g.date);
@@ -317,7 +337,7 @@
           if (!sb) return;
           if (Array.isArray(sb.slots)) {
             sb.slots.slice(0, SLOTS).forEach((s, i) => {
-              if (s && typeof s === "object") db.slots[i] = { name: str(s.name), bilateral: !!s.bilateral };
+              if (s && typeof s === "object") db.slots[i] = { name: str(s.name), bilateral: !!s.bilateral, pain: !!s.pain };
             });
           }
           if (Array.isArray(sb.rows)) {
@@ -328,6 +348,7 @@
               (r.vals || []).slice(0, SLOTS).forEach((pair, k) => {
                 if (Array.isArray(pair)) row.vals[k] = [isNum(pair[0]) ? pair[0] : null, isNum(pair[1]) ? pair[1] : null];
               });
+              (r.nrs || []).slice(0, SLOTS).forEach((v, k) => { row.nrs[k] = isNum(v) ? v : null; });
               return row;
             });
           }
@@ -377,6 +398,18 @@
     fill(knee.str, [["2026-09-07", [[312, 480], [255, 300], [1210, 1500], [260, 280]]], ["2026-10-12", [[395, 490], [281, 305], [1380, 1520], [272, 285]]]]);
     fill(knee.jmp, [["2026-10-12", [[27.5, null], [14.2, 19.0], [128, 160], [null, null], [null, null], [1.62, null], [null, null], [1.85, null]]]]);
     [0, 1, 5].forEach((i) => { p.regions.Knee.criteria[i].override = "Y"; });
+    // pain response recorded on the quadriceps test
+    knee.str.slots[0].pain = true;
+    knee.str.rows[0].nrs[0] = 3;
+    knee.str.rows[1].nrs[0] = 1;
+    // wellness log: symptoms settling over the first 11 weeks
+    [["2026-08-12", 4, 6, 5], ["2026-08-19", 3, 5, 5], ["2026-08-26", 3, 5, 4], ["2026-09-02", 2, 4, 3], ["2026-09-09", 2, 4, 4],
+      ["2026-09-16", 1, 3, 3], ["2026-09-23", 1, 3, 2], ["2026-09-30", 1, 2, 2], ["2026-10-07", 0, 3, 2], ["2026-10-14", 0, 2, 1],
+      ["2026-10-21", 0, 2, 1]].forEach(([date, rest, activity, morning]) => {
+      const w = newWellnessRow(date);
+      Object.assign(w, { rest, activity, morning, notes: NOTE });
+      p.wellness.push(w);
+    });
     fill(p.regions.Hip.blocks.str, [
       ["2026-09-28", [[20.1, 24.0], [29.0, 31.0], [11.2, 12.8], [13.0, 13.1], [25.9, 30.2], [24.1, 27.5], [18.7, 21.9]]],
       ["2026-10-19", [[22.6, 24.3], [30.4, 31.2], [12.1, 12.9], [13.4, 13.2], [28.1, 30.4], [25.8, 27.6], [20.5, 22.0]]]]);
@@ -430,14 +463,15 @@
         lsi: block.slots.map((s, k) => lsi(row.vals[k][0], row.vals[k][1], side)) };
     });
     const slots = block.slots.map((s, k) => {
-      const L = [], R = [], X = [];
+      const L = [], R = [], X = [], N = [];
       rows.forEach((r) => {
         const [l, rv] = r.row.vals[k];
         if (isNum(l)) L.push({ d: r.d, i: r.i, v: l });
         if (isNum(rv)) R.push({ d: r.d, i: r.i, v: rv });
         if (r.lsi[k] != null) X.push({ d: r.d, i: r.i, v: r.lsi[k] });
+        if (r.row.nrs && isNum(r.row.nrs[k])) N.push({ d: r.d, i: r.i, v: r.row.nrs[k] });
       });
-      const lL = latestOf(L), lR = latestOf(R), lX = latestOf(X);
+      const lL = latestOf(L), lR = latestOf(R), lX = latestOf(X), lN = latestOf(N);
       // Δ vs previous test of the same metric (score for bilateral tests, LSI otherwise)
       const series = (s.bilateral ? L : X).slice().sort((a, b) => a.d - b.d || a.i - b.i);
       let delta = null, deltaText = "";
@@ -451,6 +485,7 @@
         l: lL ? lL.v : null, r: lR ? lR.v : null, lsi: lX ? lX.v : null,
         date: lL && lL.d > 0 ? lL.d : null,
         delta, deltaText,
+        pain: !!s.pain, nrs: lN ? lN.v : null,
       };
     });
     const lastTest = rows.reduce((m, r) => (r.d > 0 && (m == null || r.d > m) ? r.d : m), null);
@@ -680,6 +715,28 @@
     };
   }
 
+  // Wellness: daily NRS trend. x = rehab week with decimals so daily entries spread out on the chart.
+  function calcWellness(player) {
+    const inj = dnum(player.profile.injuryDate);
+    const dated = player.wellness.map((w, i) => ({ w, i, d: dnum(w.date) })).filter((r) => r.d != null)
+      .sort((a, b) => a.d - b.d || a.i - b.i);
+    const measures = WELLNESS.map((m) => {
+      const pts = dated.filter((r) => isNum(r.w[m.key]));
+      const last = pts.length ? pts[pts.length - 1] : null;
+      // compare with the most recent entry at least a week before the latest one
+      let prev = null;
+      if (last) for (let j = pts.length - 2; j >= 0; j--) if (last.d - pts[j].d >= 7) { prev = pts[j]; break; }
+      return {
+        key: m.key, label: m.label,
+        latest: last ? last.w[m.key] : null, latestDate: last ? last.d : null,
+        change: last && prev ? last.w[m.key] - prev.w[m.key] : null,
+        fromStart: last && pts.length > 1 ? last.w[m.key] - pts[0].w[m.key] : null,
+        points: inj == null ? [] : pts.map((r) => [Math.round(((r.d - inj) / 7 + 1) * 100) / 100, r.w[m.key], fmtDate(r.d)]),
+      };
+    });
+    return { measures, count: dated.length, lastDate: dated.length ? dated[dated.length - 1].d : null };
+  }
+
   function calcPlayer(player) {
     const pr = player.profile, today = todayNum();
     const growth = calcGrowth(player);
@@ -699,6 +756,7 @@
       ageAtInjury: dob == null || inj == null ? null : (inj - dob) / 365.25,
       maturity: growth.maturity,
       growth,
+      wellness: calcWellness(player),
     };
   }
 
@@ -727,7 +785,7 @@
     regionTitle, blockTitle, isNum, isSpare, isGpsTest, isManual, uid,
     dnum, todayNum, todayIso, setToday, isoFromNum, fmtDate, weekOf,
     fmtInt, fmt1, fmtPct, fmtNum, fmtSigned,
-    newPlayer, newRegion, newBlockRow, newStatusRow, newSession, newGrowthRow, calcGrowth, normalizePlayer, examplePlayer,
+    newPlayer, newRegion, newBlockRow, newStatusRow, newSession, newGrowthRow, calcGrowth, newWellnessRow, calcWellness, WELLNESS, normalizePlayer, examplePlayer,
     lsi, calcBlock, calcGps, calcRegion, calcStatus, calcPlayer, headline, maturity, lsiSeries, slotSeries,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Calc;

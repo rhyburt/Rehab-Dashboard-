@@ -63,7 +63,7 @@
     if (h[0] === "p" && h[1]) return { page: "player", id: h[1], tab: h[2] || "dashboard" };
     return { page: "library" };
   }
-  const TABS = [["dashboard", "Dashboard"], ["profile", "Athlete Profile"], ["status", "Status Log"]]
+  const TABS = [["dashboard", "Dashboard"], ["profile", "Athlete Profile"], ["wellness", "Wellness"], ["status", "Status Log"]]
     .concat(C.REGIONS.map((r) => [slug(r), C.regionTitle(r)])).concat([["gps", "GPS"]]);
   function slug(region) { return region.toLowerCase(); }
   function regionFromTab(tab) { return C.REGIONS.find((r) => slug(r) === tab) || null; }
@@ -101,6 +101,11 @@
     return v >= good ? "good" : v >= warn ? "warn" : "bad";
   }
   function lsiClass(v) { const t = player.settings.lsiTarget; const g = isNum(t) ? t : 0.9; return ratioClass(v, g, g - 0.1); }
+  function nrsClass(v) { return !isNum(v) ? "" : v <= 2 ? "good" : v <= 5 ? "warn" : "bad"; }
+  const nrsBadge = (v) => (isNum(v) ? `<span class="nrs ${nrsClass(v)}" title="Pain (0–10 NRS)">${esc(C.fmtNum(v))}</span>` : "");
+  function inNrs(path, value, label) {
+    return `<input class="in num nrs-in ${nrsClass(value)}" type="text" inputmode="decimal" pattern="\\s*(10|[0-9]([.,][0-9])?)\\s*" data-bind="${path}" data-kind="num" value="${esc(num(value))}" placeholder="0–10" aria-label="${esc(label)}" autocomplete="off">`;
+  }
   function deltaClass(t) { return t.charAt(0) === "+" ? "up" : t.charAt(0) === "-" ? "down" : ""; }
 
   // ---- input builders (data-bind = path inside the player; "@lists." = app lists)
@@ -194,6 +199,7 @@
     let lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1]));
     if (isNum(o.target)) { lo = Math.min(lo, o.target); hi = Math.max(hi, o.target); }
     if (o.zero) lo = Math.min(0, lo);
+    if (isNum(o.yMax)) hi = Math.max(o.yMax, hi);
     if (isNum(o.yMin)) lo = Math.min(o.yMin, lo);
     if (hi === lo) hi = lo + (o.kind === "pct" ? 0.1 : 1);
     const yStep = niceStep((hi - lo) / 5);
@@ -229,7 +235,7 @@
         if (p[1] == null) return;
         const x = X(p[0]), y = Y(p[1]);
         marks += markerSvg(shape, x, y, 4.5, color);
-        hits += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="11" class="hit" data-tip="${esc(`${s.name} · ${o.xTip ? o.xTip(p[0]) : "wk " + p[0]} · ${o.fmtTip ? o.fmtTip(p[1]) : fmtAxis(p[1], o.kind)}`)}"/>`;
+        hits += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="11" class="hit" data-tip="${esc(`${s.name} · ${p[2] ? p[2] : o.xTip ? o.xTip(p[0]) : "wk " + p[0]} · ${o.fmtTip ? o.fmtTip(p[1]) : fmtAxis(p[1], o.kind)}`)}"/>`;
       });
     });
     const legend = series.length > 1 || o.legend ? `<div class="legend">${series.map((s, si) => {
@@ -292,6 +298,7 @@
     const calc = C.calcPlayer(player);
     if (tab === "status") return renderStatusLog(calc);
     if (tab === "profile") return renderAthlete(calc);
+    if (tab === "wellness") return renderWellness(calc);
     if (tab === "gps") return renderGps(calc);
     const reg = regionFromTab(tab);
     if (reg) return renderRegion(reg, calc);
@@ -459,7 +466,7 @@
         lastBlock = s.block;
         const empty = s.l == null && s.r == null;
         return `<tr class="${empty ? "muted" : ""}"><td class="blk">${first ? esc(s.blockLabel) : ""}</td><td>${esc(s.name)}</td><td class="c">${esc(num(s.l))}</td><td class="c">${s.bilateral ? "" : esc(num(s.r))}</td>` +
-          `<td class="c b ${lsiClass(s.lsi)}">${esc(C.fmtPct(s.lsi))}</td><td class="c ${deltaClass(s.deltaText)}">${esc(s.deltaText)}</td><td class="c mute">${esc(C.fmtDate(s.date))}</td></tr>`;
+          `<td class="c b ${lsiClass(s.lsi)}">${esc(C.fmtPct(s.lsi))}</td><td class="c ${deltaClass(s.deltaText)}">${esc(s.deltaText)}</td><td class="c mute">${esc(C.fmtDate(s.date))}${s.pain && isNum(s.nrs) ? " " + nrsBadge(s.nrs) : ""}</td></tr>`;
       }).join("");
       return `<tr class="band"><td>${esc(r.toUpperCase())}</td><td colspan="5">${esc(rc.currentPhase)}  ·  ${esc(rc.clearedText)}</td><td class="c">${esc(C.fmtDate(rc.lastTest))}</td></tr>${body}`;
     }).join("");
@@ -516,9 +523,61 @@
 
     const archBanner = p.archivedOn ? `<div class="arch-banner no-print"><b>Archived ${esc(C.fmtDate(p.archivedOn, true))}</b> — this player is in the archived list. Their history is kept and can still be edited. ${btn("unarchiveCurrent", "Restore to active players", { cls: "small" })}</div>` : "";
     return `${archBanner}<div class="dash-head"><div class="dash-title"><span class="club">Leeds United Academy  ·  Sports Medicine</span><h1>Rehabilitation Dashboard</h1></div><span class="est">Est. 1919</span></div>
-      ${profile}${status}${regionsCard}${openCard}
+      ${profile}${status}${symptomsCard(calc)}${regionsCard}${openCard}
       <div class="grid-2 top">${latestCard}${gpsCard}</div>
       ${progCard}${foot}`;
+  }
+
+  // ================================================================== wellness (0–10 NRS symptom log)
+  function changeText(c) {
+    if (c == null) return { t: "", cls: "" };
+    if (c === 0) return { t: "no change vs a week ago", cls: "mute" };
+    return { t: `${c < 0 ? "↓" : "↑"} ${C.fmtNum(Math.abs(c))} vs a week ago`, cls: c < 0 ? "up" : "down" };
+  }
+  function symBox(m) {
+    const ch = changeText(m.change);
+    const st = m.fromStart == null || m.fromStart === 0 ? null : { t: `${m.fromStart < 0 ? "↓" : "↑"} ${C.fmtNum(Math.abs(m.fromStart))} since first entry`, cls: m.fromStart < 0 ? "up" : "down" };
+    return `<div class="sym"><span class="tlbl">${esc(m.label)}</span><div class="sym-v"><span class="nrs big ${nrsClass(m.latest)}">${m.latest == null ? "–" : esc(C.fmtNum(m.latest))}</span><span class="sym-of">/ 10</span>
+      <span class="sym-ch"><span class="thint ${ch.cls}">${esc(ch.t)}</span>${st ? `<span class="thint ${st.cls}">${esc(st.t)}</span>` : ""}</span></div></div>`;
+  }
+  function nrsChart(wl, title, height) {
+    return chart({ title, kind: "int", zero: true, yMax: 10, height, series: wl.measures.map((m) => ({ name: m.label, points: m.points })),
+      empty: player.profile.injuryDate ? "No symptom scores logged yet" : "Set the injury date on the Dashboard to plot by rehab week", fmtTip: (v) => C.fmtNum(v) + " / 10" });
+  }
+  function symptomsCard(calc) {
+    const wl = calc.wellness, link = `#/p/${encodeURIComponent(player.id)}/wellness`;
+    if (!wl.count) return `<section class="card slim"><div class="card-head"><h2 class="ttl">Symptoms</h2><a class="btn" href="${link}">Log symptoms →</a></div><p class="fine">No symptom scores yet. Log pain at rest, during activity and the next morning (0–10 NRS) on the Wellness tab to see the trend here.</p></section>`;
+    const stats = wl.measures.map((m) => {
+      return symBox(m);
+    }).join("");
+    return `<section class="card">
+      <div class="card-head"><h2 class="ttl">Symptoms <span class="ttl-hint">— 0–10 NRS, last logged ${esc(C.fmtDate(wl.lastDate))}</span></h2><a class="btn" href="${link}">Wellness log →</a></div>
+      <div class="sym-wrap"><div class="syms">${stats}</div><div class="sym-chart">${nrsChart(wl, "", 190)}</div></div>
+    </section>`;
+  }
+  function renderWellness(calc) {
+    const p = player, inj = p.profile.injuryDate, wl = calc.wellness;
+    const rows = p.wellness.map((w, i) => {
+      const base = `wellness.${i}`, wk = C.weekOf(w.date, inj);
+      return `<tr data-key="${esc(w.id)}"><td>${inDate(`${base}.date`, w.date, { label: "Date" })}</td><td class="calc c">${wk == null ? "" : wk}</td>
+        ${C.WELLNESS.map((m) => `<td class="c">${inNrs(`${base}.${m.key}`, w[m.key], m.label)}</td>`).join("")}
+        <td>${inText(`${base}.notes`, w.notes, { cls: "notes wide", label: "Notes" })}</td>
+        <td>${btn("delRow", "✕", { cls: "x", data: { path: "wellness", idx: i }, title: "Delete entry" })}</td></tr>`;
+    }).join("");
+    const summary = wl.count ? `<div class="syms">${wl.measures.map((m) => {
+      return symBox(m);
+    }).join("")}</div>` : "";
+    return `<div class="pg-head"><h1>Wellness — symptom log</h1>
+        <p class="fine">Score symptoms on a 0–10 numeric rating scale (0 = no pain, 10 = worst imaginable): at rest, during activity, and the next morning as the 24-hour response. Log as often as suits you; the trend shows whether symptoms are settling. 0–2 green · 3–5 amber · 6+ red.</p></div>
+      <section class="card">
+        <h2 class="ttl">Trend</h2>${summary}
+        <div class="charts one">${nrsChart(wl, "Symptoms by rehab week (0–10 NRS)", 240)}</div>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2 class="ttl">Entries</h2>${btn("addWellness", "+ Add entry", { cls: "primary" })}</div>
+        ${rows ? `<div class="scroll" data-scroll="wellness"><table class="tbl entry"><thead><tr><th>Date</th><th class="c">Wk</th>${C.WELLNESS.map((m) => `<th class="c">${esc(m.label)}</th>`).join("")}<th>Notes</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+          : `<p class="fine">No entries yet.</p>`}
+      </section>`;
   }
 
   // ================================================================== athlete profile (growth & maturation log)
@@ -689,32 +748,37 @@
     const editing = !!ui.editSlots[ukey];
     const title = `${C.blockTitle(region, b.key)}`;
     const slotEditor = editing ? `<div class="slot-ed">
-        <p class="fine">Rename a spare slot to start using it — it appears in the table, the Dashboard and the criteria Test list. Clear a name to retire a slot (its data is kept). Bilateral tests take one score (entered in L) and have no LSI.</p>
+        <p class="fine">Rename a spare slot to start using it — it appears in the table, the Dashboard and the criteria Test list. Clear a name to retire a slot (its data is kept). Bilateral tests take one score (entered in L) and have no LSI. “Record pain” adds a 0–10 NRS column to that test for the symptom response.</p>
         <div class="slot-grid">${blk.slots.map((s, k) => `<div class="slot-row"><span class="mute">${k + 1}</span>
           ${inText(`${base}.slots.${k}.name`, C.isSpare(s.name) ? "" : s.name, { ph: C.SPARE, label: `Test slot ${k + 1}` })}
-          <label class="tick small">${inCheck(`${base}.slots.${k}.bilateral`, !!s.bilateral, { label: "Bilateral" })}<span>Bilateral</span></label></div>`).join("")}</div>
+          <label class="tick small">${inCheck(`${base}.slots.${k}.bilateral`, !!s.bilateral, { label: "Bilateral" })}<span>Bilateral</span></label>
+          <label class="tick small">${inCheck(`${base}.slots.${k}.pain`, !!s.pain, { label: "Record pain" })}<span>Record pain (NRS)</span></label></div>`).join("")}</div>
       </div>` : "";
     let table;
     if (!show.length) {
       table = `<p class="fine">No tests set up in this block. Use “Edit tests” to name one.</p>`;
     } else {
-      const head1 = show.map((s) => `<th colspan="3" class="c slot-h">${esc(s.name)}</th>`).join("");
-      const head2 = show.map((s) => s.bilateral ? `<th class="c">Score</th><th class="c">—</th><th class="c">—</th>` : `<th class="c">L</th><th class="c">R</th><th class="c">LSI</th>`).join("");
+      const span = (s) => (s.pain ? 4 : 3);
+      const head1 = show.map((s) => `<th colspan="${span(s)}" class="c slot-h">${esc(s.name)}</th>`).join("");
+      const painH = (s) => (s.pain ? `<th class="c nrs-h" title="Pain / symptom response, 0–10 NRS">NRS</th>` : "");
+      const head2 = show.map((s) => (s.bilateral ? `<th class="c">Score</th><th class="c">—</th><th class="c">—</th>` : `<th class="c">L</th><th class="c">R</th><th class="c">LSI</th>`) + painH(s)).join("");
       const rows = blk.rows.map((row, i) => {
         const rr = bc.rows[i];
         const cells = show.map((s) => {
           const vb = `${base}.rows.${i}.vals.${s.k}`;
-          if (s.bilateral) return `<td>${inNum(`${vb}.0`, row.vals[s.k][0], { label: `${s.name} score` })}</td><td class="grey"></td><td class="grey"></td>`;
-          return `<td>${inNum(`${vb}.0`, row.vals[s.k][0], { label: `${s.name} L` })}</td><td>${inNum(`${vb}.1`, row.vals[s.k][1], { label: `${s.name} R` })}</td><td class="calc c ${lsiClass(rr.lsi[s.k])}">${esc(C.fmtPct(rr.lsi[s.k]))}</td>`;
+          const pain = s.pain ? `<td class="nrs-cell">${inNrs(`${base}.rows.${i}.nrs.${s.k}`, row.nrs[s.k], `${s.name} pain 0 to 10`)}</td>` : "";
+          if (s.bilateral) return `<td>${inNum(`${vb}.0`, row.vals[s.k][0], { label: `${s.name} score` })}</td><td class="grey"></td><td class="grey"></td>${pain}`;
+          return `<td>${inNum(`${vb}.0`, row.vals[s.k][0], { label: `${s.name} L` })}</td><td>${inNum(`${vb}.1`, row.vals[s.k][1], { label: `${s.name} R` })}</td><td class="calc c ${lsiClass(rr.lsi[s.k])}">${esc(C.fmtPct(rr.lsi[s.k]))}</td>${pain}`;
         }).join("");
         return `<tr data-key="${esc(row.id)}"><td class="sticky">${inDate(`${base}.rows.${i}.date`, row.date, { label: "Test date" })}</td><td class="calc c">${rr.wk == null ? "" : rr.wk}</td>${cells}<td>${inText(`${base}.rows.${i}.notes`, row.notes, { cls: "notes", label: "Notes" })}</td><td>${btn("delRow", "✕", { cls: "x", data: { path: `${base}.rows`, idx: i }, title: "Delete row" })}</td></tr>`;
       }).join("");
-      const latest = show.map((s) => s.bilateral ? `<td class="c b">${esc(num(s.l))}</td><td class="grey"></td><td class="grey"></td>`
-        : `<td class="c b">${esc(num(s.l))}</td><td class="c b">${esc(num(s.r))}</td><td class="c b ${lsiClass(s.lsi)}">${esc(C.fmtPct(s.lsi))}</td>`).join("");
-      const dates = show.map((s) => `<td colspan="3" class="c">${esc(C.fmtDate(s.date, true))}${s.deltaText ? ` <span class="${deltaClass(s.deltaText)}">(${esc(s.deltaText)})</span>` : ""}</td>`).join("");
+      const latest = show.map((s) => (s.bilateral ? `<td class="c b">${esc(num(s.l))}</td><td class="grey"></td><td class="grey"></td>`
+        : `<td class="c b">${esc(num(s.l))}</td><td class="c b">${esc(num(s.r))}</td><td class="c b ${lsiClass(s.lsi)}">${esc(C.fmtPct(s.lsi))}</td>`) +
+        (s.pain ? `<td class="c">${nrsBadge(s.nrs)}</td>` : "")).join("");
+      const dates = show.map((s) => `<td colspan="${span(s)}" class="c">${esc(C.fmtDate(s.date, true))}${s.deltaText ? ` <span class="${deltaClass(s.deltaText)}">(${esc(s.deltaText)})</span>` : ""}</td>`).join("");
       table = `<div class="scroll" data-scroll="${esc(ukey)}"><table class="tbl entry data">
         <thead><tr><th rowspan="2" class="sticky">Date</th><th rowspan="2" class="c">Wk</th>${head1}<th rowspan="2">Notes</th><th rowspan="2"></th></tr><tr>${head2}</tr></thead>
-        <tbody>${rows || `<tr><td colspan="${show.length * 3 + 4}" class="fine">No results yet — add a test date.</td></tr>`}</tbody>
+        <tbody>${rows || `<tr><td colspan="${show.reduce((n, s) => n + span(s), 4)}" class="fine">No results yet — add a test date.</td></tr>`}</tbody>
         <tfoot><tr class="latest-row"><td class="sticky b">Latest</td><td></td>${latest}<td class="fine">Most recent entry by date, per column</td><td></td></tr>
         <tr><td class="sticky mute">Date of latest</td><td></td>${dates}<td></td><td></td></tr></tfoot>
       </table></div>`;
@@ -1174,6 +1238,11 @@
       touch(); renderNow();
       focusLast(`[data-scroll="status"] tbody tr:last-child input[type=date]`);
     },
+    addWellness() {
+      player.wellness.push(C.newWellnessRow(C.todayIso()));
+      touch(); renderNow();
+      focusLast(`[data-scroll="wellness"] tbody tr:last-child input[type=date]`);
+    },
     addGrowth() {
       const dated = player.growth.filter((g) => C.dnum(g.date) != null).sort((a, b) => C.dnum(a.date) - C.dnum(b.date));
       player.growth.push(C.newGrowthRow(C.todayIso(), dated[dated.length - 1]));
@@ -1350,6 +1419,7 @@
         if (reg) C.BLOCKS.forEach((b) => sortByDate(player.regions[reg].blocks[b.key].rows));
         if (route.tab === "status") sortByDate(player.statusLog);
         if (route.tab === "profile") sortByDate(player.growth);
+        if (route.tab === "wellness") sortByDate(player.wellness);
         if (route.tab === "gps") sortByDate(player.gps.sessions);
       }
     } else if (player) {

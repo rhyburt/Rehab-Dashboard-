@@ -15,6 +15,7 @@ A browser app version of **Rehab_Testing_Dashboard_LUFC_v5_TickBox.xlsx**: rehab
 |---|---|
 | Dashboard | **Dashboard**: player and injury details, maturity, current status, pitch-exposure chips, stage history, region ticks, what's open, latest tests with LSI and Δ, GPS summary, LSI progression charts, all regions at a glance |
 | (new) | **Athlete Profile**: dated log of height, sitting height, body mass, predicted adult height and maturity offset; % PAH, maturity status, leg length and growth rate are calculated, with growth charts. The latest values fill the Dashboard |
+| (new) | **Wellness**: 0–10 NRS symptom log (pain at rest, during activity, next morning) with a trend chart; the latest scores and changes show in a Symptoms card on the Dashboard |
 | Status Log | **Status Log**: availability, base focus and stacking pitch add-ons. The newest entry drives the headline |
 | Hip / Hamstring / Knee / Ankle-Foot / Shoulder | **Region tabs**: 6 phases × 3 live exit criteria (test · measure · operator · threshold, with Y/N override), phase status, ROM / Strength / Jump blocks with 8 renameable test slots each, injured-side LSI, latest-by-date, rehab week, and L vs R progression charts |
 | GPS | **GPS**: return-to-sport criteria, pre-injury baseline, weekly totals, weekly charts, session log. Sessions can be marked **Alter-G** (with % body weight): they plot as dashed lines and are kept out of the on-pitch % baseline, criteria and chips |
@@ -23,6 +24,10 @@ A browser app version of **Rehab_Testing_Dashboard_LUFC_v5_TickBox.xlsx**: rehab
 The calculations reproduce the workbook's formulas. The worked example (Players → **Load example player**) gives the same results as the spreadsheet: the same phases, LSIs, Δs, criteria, GPS weeks and status chips.
 
 Small differences from the spreadsheet: there is no limit on how many test dates, sessions or status entries you can add. Rows can be added and deleted with buttons. Each test slot has a "bilateral" switch. Region-tab LSI colours use the dashboard's LSI target.
+
+## Pain scores on tests
+
+In any test block, **Edit tests → Record pain (NRS)** adds a 0–10 symptom-response column to that test only. Scores are colour-coded (0–2 green, 3–5 amber, 6+ red), and the latest one appears as a small badge in the Dashboard's latest-tests list.
 
 ## Archiving players
 
