@@ -54,7 +54,7 @@
   const DATE_HEADERS = ["date", "session date", "start date", "activity date", "test date", "day", "datetime", "timestamp", "start time"];
   // header row = first row (within the first 20) that names a date column; exports often start with metadata lines
   function parse(text) {
-    text = String(text || "").replace(/^﻿/, "");
+    text = String(text || "").replace(/^\uFEFF/, "").replace(/^sep=.\r?\n/i, "");
     if (!text.trim()) return { headers: [], rows: [], delimiter: ",", headerRow: 0 };
     const delimiter = detectDelimiter(text);
     const all = parseRows(text, delimiter);
@@ -98,6 +98,8 @@
     if (m && MONTHS[m[2].slice(0, 3).toLowerCase()]) return iso(+m[3], MONTHS[m[2].slice(0, 3).toLowerCase()], +m[1]);
     m = /^([a-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{2,4})/i.exec(t);
     if (m && MONTHS[m[1].slice(0, 3).toLowerCase()]) return iso(+m[3], MONTHS[m[1].slice(0, 3).toLowerCase()], +m[2]);
+    if (/^\d{10}(\.\d+)?$/.test(t)) return new Date(Number(t) * 1000).toISOString().slice(0, 10); // Unix seconds
+    if (/^\d{13}$/.test(t)) return new Date(Number(t)).toISOString().slice(0, 10); // Unix milliseconds
     if (/^\d{5}(\.\d+)?$/.test(t)) { // Excel serial date
       const n = Math.floor(Number(t));
       if (n > 20000 && n < 80000) return new Date(Date.UTC(1899, 11, 30) + n * 864e5).toISOString().slice(0, 10);
@@ -185,13 +187,40 @@
     return out;
   }
 
-  // Performance metrics (e.g. Hawkin Dynamics): one row per trial, a test-type / tags column says which test it was
-  // (CMJ, iso squat, hip, ankle…), and several tests share the same column (e.g. "Peak Force(N)").
-  const TYPE_HEADERS = [["test", "type"], ["tags"], ["tag"], ["test"], ["test", "name"], ["protocol"], ["exercise"]];
-  const PREFIX = new Set(["iso", "isometric", "test", "cmj"]);
+  // Performance metrics (e.g. Hawkin Dynamics): one row per trial; a test-type / tags column says which test it was
+  // (CMJ, iso squat, hip, ankle…), and several tests can share one column (e.g. "Peak Force").
+  const TYPE_HEADERS = [["test", "type"], ["testtypename"], ["test", "type", "name"], ["tags"], ["tag"], ["test"], ["test", "name"], ["protocol"], ["exercise"], ["movement"]];
+  const PREFIX = new Set(["iso", "isometric", "test", "cmj", "countermovement", "jump"]);
+  // other words a tag or column might use for ours
+  const ALIASES = {
+    adduction: ["add", "adductor", "adductors", "adduct"], abduction: ["abd", "abductor", "abductors", "abduct"],
+    squat: ["sq", "imtp"], ankle: ["soleus", "calf", "plantarflexion", "pf"], plantarflexion: ["pf", "plantar", "soleus", "calf"],
+    relative: ["rel", "bm", "bw"], mrsi: ["rsimod", "rsimodified"], power: ["pwr"], height: ["ht", "jh"],
+  };
+  const compact = (s) => norm(s).replace(/ /g, "");
+  const unbracket = (t) => String(t).replace(/[([][^)\]]*[)\]]/g, " ");
+  // which piece of `text` stands for word w (the word itself or an alias)? the matched string, or null
+  function hit(w, text) {
+    const c = compact(text), tk = tokens(text);
+    if (tk.indexOf(w) >= 0 || (w.length >= 3 && c.indexOf(w) >= 0)) return w;
+    for (const a of ALIASES[w] || []) if (tk.indexOf(a) >= 0 || (a.length >= 3 && c.indexOf(a) >= 0)) return a;
+    return null;
+  }
+  // a row's test-type / tag cell passes the filter when every word of the filter appears in it
+  function filterMatch(cell, filter) {
+    const f = tokens(filter);
+    if (!f.length) return true;
+    const c = compact(cell);
+    return f.every((w) => c.indexOf(w) >= 0);
+  }
+  function headerTokens(h) {
+    const t = tokens(unbracket(h)).map((w) => (w === "rel" ? "relative" : w));
+    const c = compact(h);
+    if (t.indexOf("mrsi") < 0 && (c.indexOf("rsimod") >= 0 || (t.indexOf("rsi") >= 0 && (t.indexOf("modified") >= 0 || t.indexOf("mod") >= 0)))) t.push("mrsi");
+    if (t.indexOf("relative") < 0 && (/\b(bm|bw)\b/.test(norm(h)) || /\/ ?kg/i.test(h))) t.push("relative");
+    return t;
+  }
   function guessPerfMap(headers, rows, metrics) {
-    const unbracket = (t) => String(t).replace(/\(([^)]*)\)/g, " ");
-    // every column that looks like a test type / tag column
     const typeCols = [];
     headers.forEach((h, i) => { if (headerScore(h, TYPE_HEADERS) > 0) typeCols.push(i); });
     const values = typeCols.map((c) => ({ c, vals: Array.from(new Set(rows.map((r) => r[c]).filter(Boolean))) }));
@@ -199,39 +228,53 @@
     metrics.forEach((m) => {
       if (!m.name || m.name.charAt(0) === "(") return;
       const all = tokens(unbracket(m.name)).filter((w) => !UNIT_WORDS.has(w));
+      const isCmj = all.indexOf("cmj") >= 0 || all.indexOf("countermovement") >= 0;
+      const isIso = all.indexOf("iso") >= 0 || all.indexOf("isometric") >= 0;
       const words = all.filter((w) => !PREFIX.has(w));
-      const isCmj = all.indexOf("cmj") >= 0;
-      // which test-type / tag value belongs to this metric?
-      let type = "", typeCol = null, tBest = 0;
+      // 1. the test-type / tag value for this metric, kept as a short filter of the words that matched
+      let filter = "", typeCol = null, used = [], tBest = 0;
       values.forEach(({ c, vals }) => vals.forEach((t) => {
-        const tt = tokens(t);
-        let sc = words.filter((w) => tt.indexOf(w) >= 0).length;
-        if (isCmj && (tt.indexOf("cmj") >= 0 || tt.indexOf("countermovement") >= 0)) sc += 2;
-        if (sc > tBest) { tBest = sc; type = t; typeCol = c; }
+        const found = [], usedW = [];
+        // test-name words only (not the measure words like peak / force / height)
+        words.forEach((w) => { if (["peak", "force", "power", "relative", "height", "mrsi", "rsi"].indexOf(w) >= 0) return; const h = hit(w, t); if (h) { found.push(h); usedW.push(w); } });
+        let sc = found.length;
+        const tc = compact(t);
+        let cm = null;
+        if (isCmj) { cm = tc.indexOf("countermovement") >= 0 ? "countermovement" : tc.indexOf("cmj") >= 0 ? "cmj" : null; if (cm) sc += 2; }
+        else if (tc.indexOf("countermovement") >= 0 || tc.indexOf("cmj") >= 0 || tc.indexOf("jump") >= 0) sc -= 2;
+        if (isIso && /iso|imtp/.test(tc)) sc += 0.25;
+        if (sc > tBest) { tBest = sc; typeCol = c; filter = (cm ? [cm] : []).concat(found).join(" "); used = usedW; }
       }));
-      if (tBest < 1) { type = ""; typeCol = null; }
-      const tt = type ? tokens(type) : [];
-      const rest = words.filter((w) => tt.indexOf(w) < 0);
-      // the measure column: every remaining word present, fewest extra words, prefer "propulsive"
+      if (tBest < 1) { filter = ""; typeCol = null; used = []; }
+      // 2. the measure column: the remaining words (aliases allowed), fewest extra words;
+      //    steer away from inch, left / right, asymmetry and braking duplicates; allow a close partial match
+      const rest = words.filter((w) => used.indexOf(w) < 0);
       let col = null, cBest = -Infinity;
       headers.forEach((h, i) => {
-        if (typeCols.indexOf(i) >= 0) return;
-        const ht = tokens(unbracket(h)).map((w) => (w === "rel" ? "relative" : w));
-        if (!rest.length || !rest.every((w) => ht.indexOf(w) >= 0)) return;
-        const sc = 10 - (ht.length - rest.length) + (ht.indexOf("propulsive") >= 0 ? 0.5 : 0) - (ht.indexOf("braking") >= 0 ? 1 : 0);
+        if (typeCols.indexOf(i) >= 0 || !rest.length) return;
+        const ht = headerTokens(h), hc = compact(ht.join(" "));
+        const got = rest.filter((w) => ht.indexOf(w) >= 0 || (ALIASES[w] || []).some((a) => ht.indexOf(a) >= 0) || (w.length >= 4 && hc.indexOf(w) >= 0)).length;
+        const frac = got / rest.length;
+        if (frac < 0.67) return;
+        let sc = frac * 20 - (ht.length - got) * 0.6;
+        if (ht.indexOf("propulsive") >= 0) sc += 0.5;
+        if (ht.indexOf("braking") >= 0 || ht.indexOf("landing") >= 0) sc -= 2;
+        if (/\b(inch|inches|in|ft)\b/.test(norm(h))) sc -= 5;
+        if (/\b(left|right|l|r|asym|asymmetry|imbalance|diff)\b/.test(norm(h))) sc -= 4;
+        if (rest.indexOf("relative") < 0 && ht.indexOf("relative") >= 0) sc -= 3;
         if (sc > cBest) { cBest = sc; col = i; }
       });
-      // jump height exported in metres but logged in cm
+      // 3. jump height exported in metres but logged in cm
       let scale = 1;
       if (col != null && /\(cm\)/i.test(m.name)) {
-        const vals = rows.map((r) => toNumber(r[col])).filter((v) => v != null);
-        if (/\(m\)/.test(String(headers[col]).toLowerCase()) || (vals.length && Math.max(...vals) < 1.5)) scale = 100;
+        const vals = rows.filter((r) => typeCol == null || filterMatch(r[typeCol], filter)).map((r) => toNumber(r[col])).filter((v) => v != null);
+        if (/\(m\)|\[m\]/.test(String(headers[col]).toLowerCase()) || (vals.length && Math.max(...vals) < 1.5)) scale = 100;
       }
-      slots[m.k] = { col, typeCol, type, scale };
+      slots[m.k] = { col, typeCol, type: filter, scale };
     });
     return { typeCols, slots };
   }
 
-  root.CSVImport = { parse, toNumber, toDate, guessDateOrder, GPS_FIELDS, guessGpsMap, guessSpeedUnit, guessSlotMap, guessPerfMap, norm };
+  root.CSVImport = { parse, toNumber, toDate, guessDateOrder, GPS_FIELDS, guessGpsMap, guessSpeedUnit, guessSlotMap, guessPerfMap, filterMatch, norm };
   if (typeof module !== "undefined" && module.exports) module.exports = root.CSVImport;
 })(typeof window !== "undefined" ? window : globalThis);

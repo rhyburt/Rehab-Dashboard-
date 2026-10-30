@@ -326,8 +326,9 @@ input[type=checkbox]:focus-visible { outline: 2px solid var(--blue-2); outline-o
 .chart > svg { width: 100%; height: auto; display: block; overflow: visible; }
 .chart .grid { stroke: #E5E9F1; stroke-width: 1; }
 .chart .axis { stroke: #B7C0D3; stroke-width: 1; }
-.chart .ytick { font-size: 11px; fill: var(--mute); text-anchor: end; dominant-baseline: middle; }
-.chart .xtick { font-size: 11px; fill: var(--mute); text-anchor: middle; }
+.chart .ytick { font-size: 12px; fill: #4F5B75; text-anchor: end; }
+.chart .xtick { font-size: 12px; fill: #4F5B75; text-anchor: middle; }
+.chart .vlabel { font-size: 11.5px; font-weight: 700; fill: var(--ink); text-anchor: middle; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
 .chart .xtitle { font-size: 11px; fill: var(--mute); text-anchor: middle; }
 .chart .target { stroke: #5B6680; stroke-width: 1.4; stroke-dasharray: 6 5; }
 .chart .tlabel { font-size: 10.5px; fill: var(--ink-2); text-anchor: start; }

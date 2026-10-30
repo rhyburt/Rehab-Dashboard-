@@ -183,36 +183,44 @@
     series.forEach((s) => s.points.forEach((p) => { if (p[1] != null) pts.push(p); }));
     const head = `<figcaption>${o.titleHtml || esc(o.title)}</figcaption>`;
     if (!pts.length) return `<figure class="chart">${head}<div class="chart-empty">${esc(o.empty || "No data yet")}</div></figure>`;
-    const W = 560, H = o.height || 250, m = { l: 50, r: 16, t: 14, b: 40 };
+    const W = 560, H = o.height || 250, m = { l: 54, r: 18, t: 16, b: 42 };
     const iw = W - m.l - m.r, ih = H - m.t - m.b;
-    let xMin = 0, xMax, xStep;
-    if (o.xAuto) {
-      const lo = Math.min(...pts.map((p) => p[0])), hiX = Math.max(...pts.map((p) => p[0]));
-      xStep = niceStep(Math.max(hiX - lo, 0.5) / 6);
-      xMin = Math.floor((lo - xStep * 0.25) / xStep) * xStep;
-      xMax = Math.ceil((hiX + xStep * 0.25) / xStep) * xStep;
-    } else {
-      const xMaxData = Math.max(1, ...pts.map((p) => p[0]));
-      xStep = Math.max(1, Math.ceil(niceStep(xMaxData / 8)));
-      xMax = Math.ceil((xMaxData + 0.5) / xStep) * xStep;
+    // x axis: fitted to the data; whole weeks are labelled one by one (every 2/5… on long ranges)
+    const xs = pts.map((p) => p[0]);
+    let xLo = Math.min(...xs), xHi = Math.max(...xs);
+    let xStep;
+    if (o.xAuto) xStep = niceStep(Math.max(xHi - xLo, 0.5) / 5);
+    else {
+      const span = Math.max(1, Math.ceil(xHi) - Math.floor(xLo));
+      xStep = span <= 14 ? 1 : Math.max(1, Math.ceil(niceStep(span / 12)));
+      xLo = Math.floor(xLo); xHi = Math.ceil(xHi);
     }
+    if (xHi - xLo < xStep) { xLo -= xStep / 2; xHi += xStep / 2; }
+    const xPad = xStep * 0.45;
+    const xMin = xLo - xPad, xMax = xHi + xPad;
+    // y axis: fitted to the values entered (plus the target line), on round numbers
     let lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1]));
     if (isNum(o.target)) { lo = Math.min(lo, o.target); hi = Math.max(hi, o.target); }
     if (o.zero) lo = Math.min(0, lo);
     if (isNum(o.yMax)) hi = Math.max(o.yMax, hi);
-    if (isNum(o.yMin)) lo = Math.min(o.yMin, lo);
-    if (hi === lo) hi = lo + (o.kind === "pct" ? 0.1 : 1);
+    if (hi === lo) { const d = Math.abs(hi) * 0.1 || (o.kind === "pct" ? 0.1 : 1); lo -= d; hi += d; if (o.zero) lo = Math.max(0, lo); }
     const yStep = niceStep((hi - lo) / 5);
-    const y0 = Math.floor(lo / yStep) * yStep, y1 = Math.ceil(hi / yStep - 1e-9) * yStep + (o.kind === "pct" ? 0 : 0);
+    const y0 = Math.floor(lo / yStep + 1e-9) * yStep, y1 = Math.ceil(hi / yStep - 1e-9) * yStep;
     const X = (x) => m.l + ((x - xMin) / (xMax - xMin)) * iw;
     const Y = (y) => m.t + ih - ((y - y0) / (y1 - y0)) * ih;
+    const yDec = yStep < 1 ? Math.min(3, Math.ceil(-Math.log10(yStep) - 1e-9)) : 0;
+    const yLabel = (v) => (o.kind === "pct" ? Math.round(v * 100) + "%" : o.kind === "int" ? C.fmtInt(v) : (Math.round(v * 1000) / 1000).toFixed(yDec));
     let g = "";
-    for (let v = y0; v <= y1 + yStep / 1e6; v += yStep) {
-      const yy = Y(v).toFixed(1);
-      g += `<line x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}" class="grid"/><text x="${m.l - 6}" y="${yy}" class="ytick">${esc(fmtAxis(v, o.kind))}</text>`;
+    const nY = Math.round((y1 - y0) / yStep);
+    for (let i = 0; i <= nY; i++) {
+      const v = y0 + i * yStep, yy = Y(v).toFixed(1);
+      g += `<line x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}" class="grid"/><text x="${m.l - 8}" y="${yy}" dy="0.35em" class="ytick">${esc(yLabel(v))}</text>`;
     }
-    for (let v = xMin; v <= xMax + xStep / 1e6; v += xStep) {
-      g += `<text x="${X(v).toFixed(1)}" y="${m.t + ih + 16}" class="xtick">${Math.round(v * 100) / 100}</text>`;
+    const nX = Math.floor((xHi - Math.ceil(xLo / xStep - 1e-9) * xStep) / xStep + 1e-9);
+    const x0 = Math.ceil(xLo / xStep - 1e-9) * xStep;
+    for (let i = 0; i <= nX; i++) {
+      const v = Math.round((x0 + i * xStep) * 100) / 100, xx = X(v).toFixed(1);
+      g += `<line x1="${xx}" x2="${xx}" y1="${m.t + ih}" y2="${m.t + ih + 4}" class="axis"/><text x="${xx}" y="${m.t + ih + 17}" class="xtick">${v}</text>`;
     }
     g += `<line x1="${m.l}" x2="${W - m.r}" y1="${m.t + ih}" y2="${m.t + ih}" class="axis"/>`;
     g += `<text x="${m.l + iw / 2}" y="${H - 4}" class="xtitle">${esc(o.xTitle || "Rehab week")}</text>`;
@@ -231,6 +239,11 @@
         pen = true;
       });
       marks += `<path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"${s.dash ? ' stroke-dasharray="6 5"' : ""}/>`;
+      const lastPt = s.points.filter((p) => p[1] != null).slice(-1)[0];
+      if (series.length === 1 && lastPt) {
+        const lx = X(lastPt[0]), ly = Y(lastPt[1]);
+        marks += `<text x="${lx.toFixed(1)}" y="${(ly - 10).toFixed(1)}" class="vlabel"${lx > W - m.r - 30 ? ' text-anchor="end"' : ""}>${esc(o.fmtTip ? o.fmtTip(lastPt[1]) : fmtAxis(lastPt[1], o.kind))}</text>`;
+      }
       s.points.forEach((p) => {
         if (p[1] == null) return;
         const x = X(p[0]), y = Y(p[1]);
@@ -497,7 +510,7 @@
 
     const chRegion = calc.regions[calc.chartRegion];
     const prog = C.BLOCKS.map((b) => chart({
-      title: `${b.label} — LSI`, kind: "pct", yMin: 0.4, target: tgt,
+      title: `${b.label} — LSI`, kind: "pct", target: tgt,
       series: C.lsiSeries(chRegion, b.key), empty: "No LSI values yet",
     })).join("");
     const progCard = `<section class="card">
@@ -673,7 +686,7 @@
     const sm = pc.metrics[k];
     const selMetric = inUse.length ? inSel("settings.chartSlot.perf", k, inUse.map((m) => ({ v: m.k, t: m.name })), { kind: "selnum", cls: "chart-sel", label: "Metric to chart" }) : "";
     const charts = `<div class="charts">
-        ${chart({ title: "% of pre-injury by rehab week", kind: "pct", yMin: 0.4, target: 1, targetLabel: "pre-injury (100%)", series: inUse.map((m) => ({ name: m.name, points: m.pctPoints })).filter((x) => x.points.length), empty: inj ? "Needs a pre-injury value and a test during rehab" : "Set the injury date on the Dashboard" })}
+        ${chart({ title: "% of pre-injury by rehab week", kind: "pct", target: 1, targetLabel: "pre-injury (100%)", series: inUse.map((m) => ({ name: m.name, points: m.pctPoints })).filter((x) => x.points.length), empty: inj ? "Needs a pre-injury value and a test during rehab" : "Set the injury date on the Dashboard" })}
         ${inUse.length ? chart({ titleHtml: selMetric, title: sm.name, kind: "dec", target: isNum(sm.base) ? sm.base : null, targetLabel: isNum(sm.base) ? `pre-injury ${C.fmtNum(sm.base)}` : "", series: [{ name: sm.name, points: sm.rawPoints }], empty: "No tests during rehab for this metric yet" }) : ""}
       </div>`;
     return `<section class="card">
@@ -968,7 +981,7 @@
         const v = {};
         T.slots.forEach((sl) => {
           const c = imp.slots[sl.k] || {};
-          if (c.typeCol != null && c.typeCol !== "" && c.type && cell(r, c.typeCol) !== c.type) return;
+          if (c.typeCol != null && c.typeCol !== "" && c.type && !X.filterMatch(cell(r, c.typeCol), c.type)) return;
           const n = numAt(r, c.col);
           if (n != null) v[sl.k] = Math.round(n * (Number(c.scale) || 1) * 1000) / 1000;
         });
@@ -1038,17 +1051,29 @@
     let mapping;
     if (T.perf) {
       const valOpts = (c) => (c == null || c === "" ? [] : Array.from(new Set(P.rows.map((r) => r[c]).filter(Boolean))).sort());
+      // how many of this player's rows give each metric a value (0 = check that metric's settings)
+      const counts = {};
+      P.rows.forEach((r) => {
+        if (imp.map.player != null && imp.playerVal && r[imp.map.player] !== imp.playerVal) return;
+        T.slots.forEach((sl) => {
+          const c = imp.slots[sl.k] || {};
+          if (c.col == null || c.col === "") return;
+          if (c.typeCol != null && c.typeCol !== "" && c.type && !X.filterMatch(r[c.typeCol], c.type)) return;
+          if (X.toNumber(r[c.col], P.delimiter) != null) counts[sl.k] = (counts[sl.k] || 0) + 1;
+        });
+      });
       mapping = `<div class="imp-grid">
           <label class="field"><span>Date *</span>${sel("@ui.imp.map.date", imp.map.date, "Date column")}</label>
           <label class="field"><span>Player name</span>${sel("@ui.imp.map.player", imp.map.player, "Player column")}</label>
           <label class="field"><span>Several trials on one day</span>${inSel("@ui.imp.agg", imp.agg, [{ v: "best", t: "Keep the best" }, { v: "avg", t: "Average them" }])}</label></div>
-        <div class="scroll"><table class="tbl entry imp-slots"><thead><tr><th>Metric</th><th>Column</th><th>Only rows where…</th><th>…is</th><th>Units</th></tr></thead><tbody>
+        <div class="scroll"><table class="tbl entry imp-slots"><thead><tr><th>Metric</th><th>Value column</th><th>Only rows where…</th><th>…contains</th><th>Units</th><th class="c">Rows</th></tr></thead><tbody>
         ${T.slots.map((sl) => {
           const c = imp.slots[sl.k] || {}, b = `@ui.imp.slots.${sl.k}`;
           return `<tr><td class="b">${esc(sl.name)}</td><td>${sel(`${b}.col`, c.col, `${sl.name} column`)}</td>
             <td>${inSel(`${b}.typeCol`, c.typeCol, [{ v: "", t: "— any row —" }].concat(P.headers.map((h, i) => ({ v: i, t: h }))), { kind: "selnum", label: `${sl.name} filter column` })}</td>
-            <td>${c.typeCol == null || c.typeCol === "" ? `<span class="mute">—</span>` : inSel(`${b}.type`, c.type || "", [{ v: "", t: "any value" }].concat(valOpts(c.typeCol)), { label: `${sl.name} filter value` })}</td>
-            <td>${inSel(`${b}.scale`, String(c.scale || 1), [{ v: "1", t: "as exported" }, { v: "100", t: "m → cm (×100)" }], { label: `${sl.name} units` })}</td></tr>`;
+            <td>${c.typeCol == null || c.typeCol === "" ? `<span class="mute">—</span>` : `<input class="in" type="text" list="impvals${sl.k}" data-bind="${b}.type" data-kind="text" value="${esc(c.type || "")}" placeholder="e.g. squat" aria-label="${esc(sl.name)} filter words" autocomplete="off"><datalist id="impvals${sl.k}">${valOpts(c.typeCol).map((v) => `<option value="${esc(v)}">`).join("")}</datalist>`}</td>
+            <td>${inSel(`${b}.scale`, String(c.scale || 1), [{ v: "1", t: "as exported" }, { v: "100", t: "m → cm (×100)" }], { label: `${sl.name} units` })}</td>
+            <td class="c ${counts[sl.k] ? "" : "warn"}">${counts[sl.k] || 0}</td></tr>`;
         }).join("")}</tbody></table></div>`;
     } else if (T.gps) {
       mapping = `<div class="imp-grid">${X.GPS_FIELDS.map((f) => `<label class="field"><span>${esc(f.label)}${f.required ? " *" : ""}</span>${sel(`@ui.imp.map.${f.key}`, imp.map[f.key], f.label)}</label>`).join("")}
@@ -1081,7 +1106,7 @@
     }
     const what = T.gps ? (imp.alterg ? "Alter-G session" : "session") : "test date";
     return `<div class="imp-panel"><h3 class="sub-ttl">Import ${T.gps ? "GPS sessions" : T.perf ? "performance tests" : "test results"} from CSV</h3>${head}
-      <p class="fine">Check the columns below — they're matched automatically from the headings. ${T.gps ? "Distances in metres; speeds converted to m/s." : T.perf ? "Hawkin exports list each trial on its own row and say which test it was in the Test Type or Tags column — pick that under “Only rows where…”. Tests dated before the injury become the pre-injury values. A date that's already logged is filled in, not duplicated." : "Rows for a date that's already in the table fill in that row rather than adding a new one."}</p>
+      <p class="fine">Check the columns below — they're matched automatically from the headings. ${T.gps ? "Distances in metres; speeds converted to m/s." : T.perf ? "Hawkin exports list each trial on its own row and say which test it was in the Test Type or Tags column: “Only rows where … contains” picks out that test (e.g. Tags contains “hip add”). “Rows” shows how many trials each metric found; amber 0 means check that line. Tests dated before the injury become the pre-injury values. A date that's already logged is filled in, not duplicated." : "Rows for a date that's already in the table fill in that row rather than adding a new one."}</p>
       <div class="imp-grid top">${dates}${who}</div>
       ${mapping}
       <div class="imp-sum ${ok && res.rows.length ? "" : "warn-box"}">${!ok ? "Pick the date column to continue." : res.rows.length ? `<b>${res.rows.length} ${what}${res.rows.length === 1 ? "" : "s"}</b> ready to import` : "Nothing to import with these settings"}${skipped ? ` · skipped ${esc(skipped)}` : ""}</div>
