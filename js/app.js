@@ -964,11 +964,13 @@
   }
   function buildImport() {
     const imp = ui.imp, P = imp.P, T = importTarget(), mp = imp.map;
-    const out = [], skip = { date: 0, player: 0, dup: 0, empty: 0 };
+    const out = [], skip = { date: 0, player: 0, dup: 0, empty: 0, excluded: 0 };
+    const exCol = X.excludedCol(P.headers);
     const cell = (r, i) => (i == null || i === "" ? "" : r[i]);
     const numAt = (r, i) => (i == null || i === "" ? null : X.toNumber(r[i], P.delimiter));
     P.rows.forEach((r) => {
       if (mp.player != null && imp.playerVal && cell(r, mp.player) !== imp.playerVal) { skip.player++; return; }
+      if (exCol >= 0 && X.isExcluded(r[exCol])) { skip.excluded++; return; }
       const date = X.toDate(cell(r, mp.date), imp.dateOrder);
       if (!date) { skip.date++; return; }
       if (T.gps) {
@@ -1041,7 +1043,7 @@
     const sel = (path, val, label) => inSel(path, val, colOpts, { kind: "selnum", label });
     const head = `<div class="imp-src">
         <label class="field grow"><span>Paste the export here (CSV or copied from Excel)</span>${inArea("@ui.imp.text", imp.text, { rows: 4, cls: "mono" })}</label>
-        <div class="imp-or">or</div>${btn("importCsvFile", "Choose CSV file…")}
+        <div class="imp-or">or</div>${btn("importCsvFile", "Choose CSV or zip file…")}
       </div>${imp.fileName ? `<p class="fine">Loaded <b>${esc(imp.fileName)}</b></p>` : ""}`;
     if (!P.headers.length) {
       return `<div class="imp-panel"><h3 class="sub-ttl">Import ${T.gps ? "GPS sessions" : T.perf ? "performance tests" : "test results"} from CSV</h3>${head}
@@ -1073,7 +1075,7 @@
             <td>${inSel(`${b}.typeCol`, c.typeCol, [{ v: "", t: "— any row —" }].concat(P.headers.map((h, i) => ({ v: i, t: h }))), { kind: "selnum", label: `${sl.name} filter column` })}</td>
             <td>${c.typeCol == null || c.typeCol === "" ? `<span class="mute">—</span>` : `<input class="in" type="text" list="impvals${sl.k}" data-bind="${b}.type" data-kind="text" value="${esc(c.type || "")}" placeholder="e.g. squat" aria-label="${esc(sl.name)} filter words" autocomplete="off"><datalist id="impvals${sl.k}">${valOpts(c.typeCol).map((v) => `<option value="${esc(v)}">`).join("")}</datalist>`}</td>
             <td>${inSel(`${b}.scale`, String(c.scale || 1), [{ v: "1", t: "as exported" }, { v: "100", t: "m → cm (×100)" }], { label: `${sl.name} units` })}</td>
-            <td class="c ${counts[sl.k] ? "" : "warn"}">${counts[sl.k] || 0}</td></tr>`;
+            <td class="c ${c.col == null || c.col === "" ? "mute" : counts[sl.k] ? "" : "warn"}">${c.col == null || c.col === "" ? "not in file" : counts[sl.k] || 0}</td></tr>`;
         }).join("")}</tbody></table></div>`;
     } else if (T.gps) {
       mapping = `<div class="imp-grid">${X.GPS_FIELDS.map((f) => `<label class="field"><span>${esc(f.label)}${f.required ? " *" : ""}</span>${sel(`@ui.imp.map.${f.key}`, imp.map[f.key], f.label)}</label>`).join("")}
@@ -1095,7 +1097,7 @@
     const ok = imp.map.date != null;
     const res = ok ? buildImport() : { rows: [], skip: {} };
     const sk = res.skip;
-    const skipped = [sk.player ? `${sk.player} other players` : "", sk.date ? `${sk.date} without a readable date` : "", sk.empty ? `${sk.empty} with no values` : "", sk.dup ? `${sk.dup} already logged` : ""].filter(Boolean).join(", ");
+    const skipped = [sk.player ? `${sk.player} other players` : "", sk.date ? `${sk.date} without a readable date` : "", sk.empty ? `${sk.empty} with no values` : "", sk.dup ? `${sk.dup} already logged` : "", sk.excluded ? `${sk.excluded} marked Excluded` : ""].filter(Boolean).join(", ");
     let preview = "";
     if (res.rows.length) {
       const sample = res.rows.slice(0, 6);
@@ -1160,8 +1162,16 @@
     const file = e.target.files && e.target.files[0];
     e.target.value = "";
     if (!file || !ui.imp) return;
+    const done = (text, label) => { ui.imp.text = text; ui.imp.fileName = label; renderNow(); };
+    if (/\.zip$/i.test(file.name)) {
+      file.arrayBuffer().then(X.unzip).then((files) => {
+        if (!files.length) { toast("No CSV files found inside that zip."); return; }
+        done(X.mergeCsv(files.map((f) => f.text)), `${file.name} (${files.map((f) => f.name.replace(/\.csv$/i, "")).join(", ")})`);
+      }).catch((err) => toast("Couldn't open that zip: " + err.message));
+      return;
+    }
     const reader = new FileReader();
-    reader.onload = () => { ui.imp.text = String(reader.result || ""); ui.imp.fileName = file.name; renderNow(); };
+    reader.onload = () => done(String(reader.result || ""), file.name);
     reader.readAsText(file);
   });
 

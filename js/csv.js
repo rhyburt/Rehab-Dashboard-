@@ -189,7 +189,7 @@
 
   // Performance metrics (e.g. Hawkin Dynamics): one row per trial; a test-type / tags column says which test it was
   // (CMJ, iso squat, hip, ankle…), and several tests can share one column (e.g. "Peak Force").
-  const TYPE_HEADERS = [["test", "type"], ["testtypename"], ["test", "type", "name"], ["tags"], ["tag"], ["test"], ["test", "name"], ["protocol"], ["exercise"], ["movement"]];
+  const TYPE_HEADERS = [["type"], ["test", "type"], ["testtypename"], ["test", "type", "name"], ["tags"], ["tag"], ["test"], ["test", "name"], ["protocol"], ["exercise"], ["movement"]];
   const PREFIX = new Set(["iso", "isometric", "test", "cmj", "countermovement", "jump"]);
   // other words a tag or column might use for ours
   const ALIASES = {
@@ -233,6 +233,7 @@
       const words = all.filter((w) => !PREFIX.has(w));
       // 1. the test-type / tag value for this metric, kept as a short filter of the words that matched
       let filter = "", typeCol = null, used = [], tBest = 0;
+      const nRows = rows.length || 1;
       values.forEach(({ c, vals }) => vals.forEach((t) => {
         const found = [], usedW = [];
         // test-name words only (not the measure words like peak / force / height)
@@ -242,8 +243,14 @@
         let cm = null;
         if (isCmj) { cm = tc.indexOf("countermovement") >= 0 ? "countermovement" : tc.indexOf("cmj") >= 0 ? "cmj" : null; if (cm) sc += 2; }
         else if (tc.indexOf("countermovement") >= 0 || tc.indexOf("cmj") >= 0 || tc.indexOf("jump") >= 0) sc -= 2;
+        if (!found.length && !cm) return; // the value must actually name this test
         if (isIso && /iso|imtp/.test(tc)) sc += 0.25;
-        if (sc > tBest) { tBest = sc; typeCol = c; filter = (cm ? [cm] : []).concat(found).join(" "); used = usedW; }
+        // prefer the filter that keeps the most rows: e.g. Type "Countermovement Jump" (every CMJ) over a tag
+        // like "CMJ - with Arms" that only some sessions carry
+        const f = (cm ? [cm] : []).concat(found).join(" ");
+        const cover = rows.filter((r) => filterMatch(r[c], f)).length / nRows;
+        sc += 1.5 * cover;
+        if (sc > tBest) { tBest = sc; typeCol = c; filter = f; used = usedW; }
       }));
       if (tBest < 1) { filter = ""; typeCol = null; used = []; }
       // 2. the measure column: the remaining words (aliases allowed), fewest extra words;
@@ -275,6 +282,53 @@
     return { typeCols, slots };
   }
 
-  root.CSVImport = { parse, toNumber, toDate, guessDateOrder, GPS_FIELDS, guessGpsMap, guessSpeedUnit, guessSlotMap, guessPerfMap, filterMatch, norm };
+  // Hawkin's "Excluded" column marks trials rejected in their app
+  const excludedCol = (headers) => headers.findIndex((h) => norm(h) === "excluded" || norm(h) === "is excluded");
+  const isExcluded = (v) => /^(true|yes|y|1|x|excluded)$/i.test(String(v || "").trim());
+
+  // ------------------------------------------------------------------ zip exports (Hawkin sends a .zip with one CSV per test type)
+  async function unzip(buf) {
+    const dv = new DataView(buf), u8 = new Uint8Array(buf);
+    let eocd = -1;
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    if (eocd < 0) throw new Error("not a zip file");
+    const count = dv.getUint16(eocd + 10, true);
+    let p = dv.getUint32(eocd + 16, true);
+    const out = [];
+    for (let n = 0; n < count; n++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) break;
+      const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
+      const nameLen = dv.getUint16(p + 28, true), extraLen = dv.getUint16(p + 30, true), commentLen = dv.getUint16(p + 32, true);
+      const local = dv.getUint32(p + 42, true);
+      const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nameLen));
+      p += 46 + nameLen + extraLen + commentLen;
+      if (!/\.(csv|txt)$/i.test(name) || /(^|\/)(__MACOSX|\.)/.test(name)) continue;
+      const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
+      const raw = u8.subarray(start, start + csize);
+      let data;
+      if (method === 0) data = raw;
+      else if (method === 8 && typeof DecompressionStream !== "undefined") {
+        const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+        data = new Uint8Array(await new Response(stream).arrayBuffer());
+      } else throw new Error("this zip uses compression the browser can't open — unzip it and choose the CSV instead");
+      out.push({ name: name.split("/").pop(), text: new TextDecoder().decode(data) });
+    }
+    return out;
+  }
+  // several CSVs (one per test type) -> one table with every column
+  function mergeCsv(texts) {
+    if (texts.length === 1) return texts[0];
+    const parts = texts.map(parse).filter((P) => P.headers.length);
+    const headers = [];
+    parts.forEach((P) => P.headers.forEach((h) => { if (headers.indexOf(h) < 0) headers.push(h); }));
+    const q = (v) => (/[",\n\r]/.test(v) ? '"' + String(v).replace(/"/g, '""') + '"' : v);
+    const lines = [headers.map(q).join(",")];
+    parts.forEach((P) => P.rows.forEach((r) => {
+      lines.push(headers.map((h) => { const i = P.headers.indexOf(h); return q(i < 0 ? "" : r[i] || ""); }).join(","));
+    }));
+    return lines.join("\n");
+  }
+
+  root.CSVImport = { parse, toNumber, toDate, guessDateOrder, GPS_FIELDS, guessGpsMap, guessSpeedUnit, guessSlotMap, guessPerfMap, filterMatch, excludedCol, isExcluded, unzip, mergeCsv, norm };
   if (typeof module !== "undefined" && module.exports) module.exports = root.CSVImport;
 })(typeof window !== "undefined" ? window : globalThis);

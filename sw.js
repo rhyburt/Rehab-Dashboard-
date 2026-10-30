@@ -1,6 +1,6 @@
 // Rehab Dashboard — service worker (offline app shell).
 // Bump CACHE on every release so installed copies pick up the new files.
-const CACHE = "rehabdash-v8";
+const CACHE = "rehabdash-v9";
 const PREFIX = "rehabdash-";
 const ASSETS = [
   "./",
