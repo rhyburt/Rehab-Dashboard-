@@ -187,104 +187,67 @@
     return out;
   }
 
-  // Performance metrics (e.g. Hawkin Dynamics): one row per trial; a test-type / tags column says which test it was
-  // (CMJ, iso squat, hip, ankle…), and several tests can share one column (e.g. "Peak Force").
-  const TYPE_HEADERS = [["type"], ["test", "type"], ["testtypename"], ["test", "type", "name"], ["tags"], ["tag"], ["test"], ["test", "name"], ["protocol"], ["exercise"], ["movement"]];
-  const PREFIX = new Set(["iso", "isometric", "test", "cmj", "countermovement", "jump"]);
-  // other words a tag or column might use for ours
-  const ALIASES = {
-    adduction: ["add", "adductor", "adductors", "adduct"], abduction: ["abd", "abductor", "abductors", "abduct"],
-    squat: ["sq", "imtp"], ankle: ["soleus", "calf", "plantarflexion", "pf"], plantarflexion: ["pf", "plantar", "soleus", "calf"],
-    relative: ["rel", "bm", "bw"], mrsi: ["rsimod", "rsimodified"], power: ["pwr"], height: ["ht", "jh"],
-  };
-  const compact = (s) => norm(s).replace(/ /g, "");
-  const unbracket = (t) => String(t).replace(/[([][^)\]]*[)\]]/g, " ");
-  // which piece of `text` stands for word w (the word itself or an alias)? the matched string, or null
-  function hit(w, text) {
-    const c = compact(text), tk = tokens(text);
-    if (tk.indexOf(w) >= 0 || (w.length >= 3 && c.indexOf(w) >= 0)) return w;
-    for (const a of ALIASES[w] || []) if (tk.indexOf(a) >= 0 || (a.length >= 3 && c.indexOf(a) >= 0)) return a;
-    return null;
-  }
-  // a row's test-type / tag cell passes the filter when every word of the filter appears in it
-  function filterMatch(cell, filter) {
-    const f = tokens(filter);
-    if (!f.length) return true;
-    const c = compact(cell);
-    return f.every((w) => c.indexOf(w) >= 0);
-  }
-  function headerTokens(h) {
-    const t = tokens(unbracket(h)).map((w) => (w === "rel" ? "relative" : w));
-    const c = compact(h);
-    if (t.indexOf("mrsi") < 0 && (c.indexOf("rsimod") >= 0 || (t.indexOf("rsi") >= 0 && (t.indexOf("modified") >= 0 || t.indexOf("mod") >= 0)))) t.push("mrsi");
-    if (t.indexOf("relative") < 0 && (/\b(bm|bw)\b/.test(norm(h)) || /\/ ?kg/i.test(h))) t.push("relative");
-    return t;
-  }
-  function guessPerfMap(headers, rows, metrics) {
-    const typeCols = [];
-    headers.forEach((h, i) => { if (headerScore(h, TYPE_HEADERS) > 0) typeCols.push(i); });
-    const values = typeCols.map((c) => ({ c, vals: Array.from(new Set(rows.map((r) => r[c]).filter(Boolean))) }));
-    const slots = {};
-    metrics.forEach((m) => {
-      if (!m.name || m.name.charAt(0) === "(") return;
-      const all = tokens(unbracket(m.name)).filter((w) => !UNIT_WORDS.has(w));
-      const isCmj = all.indexOf("cmj") >= 0 || all.indexOf("countermovement") >= 0;
-      const isIso = all.indexOf("iso") >= 0 || all.indexOf("isometric") >= 0;
-      const words = all.filter((w) => !PREFIX.has(w));
-      // 1. the test-type / tag value for this metric, kept as a short filter of the words that matched
-      let filter = "", typeCol = null, used = [], tBest = 0;
-      const nRows = rows.length || 1;
-      values.forEach(({ c, vals }) => vals.forEach((t) => {
-        const found = [], usedW = [];
-        // test-name words only (not the measure words like peak / force / height)
-        words.forEach((w) => { if (["peak", "force", "power", "relative", "height", "mrsi", "rsi"].indexOf(w) >= 0) return; const h = hit(w, t); if (h) { found.push(h); usedW.push(w); } });
-        let sc = found.length;
-        const tc = compact(t);
-        let cm = null;
-        if (isCmj) { cm = tc.indexOf("countermovement") >= 0 ? "countermovement" : tc.indexOf("cmj") >= 0 ? "cmj" : null; if (cm) sc += 2; }
-        else if (tc.indexOf("countermovement") >= 0 || tc.indexOf("cmj") >= 0 || tc.indexOf("jump") >= 0) sc -= 2;
-        if (!found.length && !cm) return; // the value must actually name this test
-        if (isIso && /iso|imtp/.test(tc)) sc += 0.25;
-        // prefer the filter that keeps the most rows: e.g. Type "Countermovement Jump" (every CMJ) over a tag
-        // like "CMJ - with Arms" that only some sessions carry
-        const f = (cm ? [cm] : []).concat(found).join(" ");
-        const cover = rows.filter((r) => filterMatch(r[c], f)).length / nRows;
-        sc += 1.5 * cover;
-        if (sc > tBest) { tBest = sc; typeCol = c; filter = f; used = usedW; }
-      }));
-      if (tBest < 1) { filter = ""; typeCol = null; used = []; }
-      // 2. the measure column: the remaining words (aliases allowed), fewest extra words;
-      //    steer away from inch, left / right, asymmetry and braking duplicates; allow a close partial match
-      const rest = words.filter((w) => used.indexOf(w) < 0);
-      let col = null, cBest = -Infinity;
-      headers.forEach((h, i) => {
-        if (typeCols.indexOf(i) >= 0 || !rest.length) return;
-        const ht = headerTokens(h), hc = compact(ht.join(" "));
-        const got = rest.filter((w) => ht.indexOf(w) >= 0 || (ALIASES[w] || []).some((a) => ht.indexOf(a) >= 0) || (w.length >= 4 && hc.indexOf(w) >= 0)).length;
-        const frac = got / rest.length;
-        if (frac < 0.67) return;
-        let sc = frac * 20 - (ht.length - got) * 0.6;
-        if (ht.indexOf("propulsive") >= 0) sc += 0.5;
-        if (ht.indexOf("braking") >= 0 || ht.indexOf("landing") >= 0) sc -= 2;
-        if (/\b(inch|inches|in|ft)\b/.test(norm(h))) sc -= 5;
-        if (/\b(left|right|l|r|asym|asymmetry|imbalance|diff)\b/.test(norm(h))) sc -= 4;
-        if (rest.indexOf("relative") < 0 && ht.indexOf("relative") >= 0) sc -= 3;
-        if (sc > cBest) { cBest = sc; col = i; }
-      });
-      // 3. jump height exported in metres but logged in cm
-      let scale = 1;
-      if (col != null && /\(cm\)/i.test(m.name)) {
-        const vals = rows.filter((r) => typeCol == null || filterMatch(r[typeCol], filter)).map((r) => toNumber(r[col])).filter((v) => v != null);
-        if (/\(m\)|\[m\]/.test(String(headers[col]).toLowerCase()) || (vals.length && Math.max(...vals) < 1.5)) scale = 100;
-      }
-      slots[m.k] = { col, typeCol, type: filter, scale };
-    });
-    return { typeCols, slots };
-  }
-
   // Hawkin's "Excluded" column marks trials rejected in their app
   const excludedCol = (headers) => headers.findIndex((h) => norm(h) === "excluded" || norm(h) === "is excluded");
   const isExcluded = (v) => /^(true|yes|y|1|x|excluded)$/i.test(String(v || "").trim());
+
+  // Performance metrics (e.g. Hawkin Dynamics): one row per trial. Trials are grouped by test using the Type column
+  // ("Countermovement Jump", "Isometric Test"…); isometric tests are told apart by their first tag ("Iso Squat",
+  // "Hip Add"…). Every numeric column becomes a metric, named exactly as in the file.
+  const TYPE_HEADERS = [["type"], ["test", "type"], ["testtypename"], ["test", "type", "name"], ["test"], ["test", "name"], ["protocol"], ["exercise"], ["movement"]];
+  const META = new Set(["testid", "test id", "id", "date", "time", "name", "athlete", "athlete name", "player", "player name", "teams", "team",
+    "groups", "group", "position", "birthdate", "dob", "date of birth", "segment", "type", "test type", "excluded", "tags", "tag", "timestamp",
+    "trial", "trial number", "rep", "notes", "comment", "comments", "external id", "externalid"]);
+  // key measures ticked by default when they're in the file
+  const KEY_METRICS = ["jump height", "mrsi", "rsi modified", "rsi", "peak relative propulsive power", "relative peak propulsive power",
+    "peak propulsive power", "braking rfd", "time to takeoff", "peak force", "relative peak force", "peak force bm", "net peak force", "contact time"];
+  const baseName = (h) => norm(String(h).replace(/[([][^)\]]*[)\]]/g, " "));
+  // timings: smaller is better
+  const lowerIsBetter = (h) => /\b(time|contact|duration|phase)\b/.test(baseName(h)) && !/%/.test(h);
+  const isPlainNumber = (v) => /^\s*-?\d+(\.\d+)?\s*$/.test(String(v == null ? "" : v));
+  function guessTestCols(headers) {
+    let testCol = null, best = 0;
+    headers.forEach((h, i) => { if (norm(h) === "tags" || norm(h) === "tag") return; const sc = headerScore(h, TYPE_HEADERS); if (sc > best) { best = sc; testCol = i; } });
+    const tagCol = headers.findIndex((h) => norm(h) === "tags" || norm(h) === "tag");
+    return { testCol, tagCol: tagCol < 0 ? null : tagCol };
+  }
+  // o: { dateCol, playerCol, playerVal, testCol, tagCol, dateOrder }
+  function perfGroups(P, o) {
+    const ex = excludedCol(P.headers);
+    const groups = {}, order = [];
+    let skipped = { player: 0, excluded: 0, date: 0 };
+    P.rows.forEach((r) => {
+      if (o.playerCol != null && o.playerVal && r[o.playerCol] !== o.playerVal) { skipped.player++; return; }
+      if (ex >= 0 && isExcluded(r[ex])) { skipped.excluded++; return; }
+      const date = toDate(r[o.dateCol], o.dateOrder);
+      if (!date) { skipped.date++; return; }
+      let label = o.testCol != null ? String(r[o.testCol] || "").trim() : "";
+      if (o.tagCol != null && /iso/i.test(label)) {
+        const tag = String(r[o.tagCol] || "").split(/[,;|]/)[0].trim();
+        if (tag) label = tag;
+      }
+      if (!label) label = "Tests";
+      if (!groups[label]) { groups[label] = { label, rows: [] }; order.push(label); }
+      groups[label].rows.push({ r, date });
+    });
+    const list = order.map((label) => {
+      const g = groups[label];
+      const cols = [];
+      P.headers.forEach((h, i) => {
+        if (META.has(norm(h)) || i === o.testCol || i === o.tagCol || i === o.dateCol || i === o.playerCol || i === ex) return;
+        const vals = g.rows.map((x) => x.r[i]).filter((v) => String(v || "").trim() !== "");
+        if (!vals.length || !vals.every(isPlainNumber)) return; // text or "L|R"-style columns are left out
+        // example = best trial on the most recent day
+        const latestDay = g.rows.filter((x) => isPlainNumber(x.r[i])).map((x) => x.date).sort().pop();
+        const dayVals = g.rows.filter((x) => x.date === latestDay && isPlainNumber(x.r[i])).map((x) => Number(x.r[i]));
+        const lower = lowerIsBetter(h);
+        cols.push({ i, name: h.trim(), n: vals.length, lower, example: dayVals.length ? (lower ? Math.min(...dayVals) : Math.max(...dayVals)) : null,
+          key: KEY_METRICS.indexOf(baseName(h)) >= 0 });
+      });
+      return { label, trials: g.rows.length, days: new Set(g.rows.map((x) => x.date)).size, rows: g.rows, cols };
+    }).filter((g) => g.cols.length);
+    return { groups: list, skipped };
+  }
 
   // ------------------------------------------------------------------ zip exports (Hawkin sends a .zip with one CSV per test type)
   async function unzip(buf) {
@@ -329,6 +292,6 @@
     return lines.join("\n");
   }
 
-  root.CSVImport = { parse, toNumber, toDate, guessDateOrder, GPS_FIELDS, guessGpsMap, guessSpeedUnit, guessSlotMap, guessPerfMap, filterMatch, excludedCol, isExcluded, unzip, mergeCsv, norm };
+  root.CSVImport = { parse, toNumber, toDate, guessDateOrder, GPS_FIELDS, guessGpsMap, guessSpeedUnit, guessSlotMap, guessTestCols, perfGroups, excludedCol, isExcluded, unzip, mergeCsv, norm };
   if (typeof module !== "undefined" && module.exports) module.exports = root.CSVImport;
 })(typeof window !== "undefined" ? window : globalThis);

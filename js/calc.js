@@ -254,14 +254,12 @@
     { key: "activity", label: "Pain during activity" },
     { key: "morning", label: "Pain next morning (24 h)" },
   ];
-  // Performance testing (Athlete Profile): e.g. Hawkin CMJ and isometrics, compared with pre-injury values
-  const PERF_SLOTS = 10;
-  const PERF_DEFAULTS = ["CMJ Jump Height (cm)", "CMJ mRSI", "CMJ Relative Peak Power (W/kg)", "Iso Squat Peak Force (N)",
-    "Iso Squat Relative Force (N/kg)", "Hip Adduction Iso Peak Force (N)", "Hip Abduction Iso Peak Force (N)", "Ankle Iso Peak Force (N)"];
-  function newPerf() {
-    return { metrics: PERF_DEFAULTS.concat(Array(PERF_SLOTS).fill(SPARE)).slice(0, PERF_SLOTS).map((n) => ({ name: n, base: null })), rows: [] };
-  }
-  function newPerfRow(date) { return { id: uid("f"), date: date || "", vals: Array(PERF_SLOTS).fill(null), notes: "" }; }
+  // Performance testing (Athlete Profile): metrics are created from imported files (e.g. Hawkin), named exactly as the
+  // file names them and grouped by test ("Countermovement Jump", "Iso Squat"…); rows hold values keyed by metric id
+  function newPerf() { return { metrics: [], rows: [] }; }
+  // lower: smaller is better (timings) — "best" is the lowest value
+  function newPerfMetric(test, name, lower) { return { id: uid("m"), test: test || "", name: name || "", base: null, lower: !!lower }; }
+  function newPerfRow(date) { return { id: uid("f"), date: date || "", vals: {}, notes: "" }; }
   function newWellnessRow(date) { return { id: uid("w"), date: date || "", rest: null, activity: null, morning: null, notes: "" }; }
   function newStatusRow(date, prev) {
     const addons = {};
@@ -288,14 +286,22 @@
     p.archivedOn = typeof raw.archivedOn === "string" ? raw.archivedOn : "";
     Object.keys(p.profile).forEach((k) => { if (raw.profile && raw.profile[k] !== undefined) p.profile[k] = raw.profile[k]; });
     if (raw.perf && typeof raw.perf === "object") {
-      if (Array.isArray(raw.perf.metrics)) raw.perf.metrics.slice(0, PERF_SLOTS).forEach((m, i) => {
-        if (m && typeof m === "object") p.perf.metrics[i] = { name: str(m.name), base: isNum(m.base) ? m.base : null };
+      const rawRows = Array.isArray(raw.perf.rows) ? raw.perf.rows : [];
+      const ids = [];
+      // older saves used ten fixed slots with values in arrays; keep the slots that were named or hold data
+      (Array.isArray(raw.perf.metrics) ? raw.perf.metrics : []).forEach((m, i) => {
+        if (!m || typeof m !== "object") return;
+        const id = m.id ? str(m.id) : "m" + i;
+        const hasData = rawRows.some((r) => r && r.vals && isNum(Array.isArray(r.vals) ? r.vals[i] : r.vals[id]));
+        if (!m.id && isSpare(m.name) && !hasData) return;
+        ids.push({ from: m.id ? id : i, id });
+        p.perf.metrics.push({ id, test: str(m.test), name: str(m.name) || "Metric " + (i + 1), base: isNum(m.base) ? m.base : null, lower: !!m.lower });
       });
-      if (Array.isArray(raw.perf.rows)) p.perf.rows = raw.perf.rows.map((r) => {
+      p.perf.rows = rawRows.map((r) => {
         const row = newPerfRow(r.date);
         row.id = r.id || row.id;
         row.notes = str(r.notes);
-        (r.vals || []).slice(0, PERF_SLOTS).forEach((v, k) => { row.vals[k] = isNum(v) ? v : null; });
+        ids.forEach(({ from, id }) => { const v = r.vals ? r.vals[from] : null; if (isNum(v)) row.vals[id] = v; });
         return row;
       });
     }
@@ -424,10 +430,14 @@
     knee.str.rows[0].nrs[0] = 3;
     knee.str.rows[1].nrs[0] = 1;
     // performance testing: pre-season (pre-injury) and two tests during rehab
-    [["2026-07-20", [38.5, 0.52, 58.1, 2650, 46.0, 410, 395, 1720]], ["2026-09-28", [null, null, null, 1980, 34.4, 330, 340, 1310]],
-      ["2026-10-19", [29.0, 0.38, 47.5, 2240, 38.5, 365, 372, 1455]]].forEach(([date, vals]) => {
+    const pm = [["Countermovement Jump", "Jump Height"], ["Countermovement Jump", "mRSI"], ["Countermovement Jump", "Peak Relative Propulsive Power"],
+      ["Iso Squat", "Peak Force"], ["Iso Squat", "Relative Peak Force"], ["Hip Adduction", "Peak Force"], ["Hip Abduction", "Peak Force"],
+      ["Ankle Iso", "Peak Force"]].map(([t, n]) => newPerfMetric(t, n));
+    p.perf.metrics = pm;
+    [["2026-07-20", [0.385, 0.52, 58.1, 2650, 46.0, 410, 395, 1720]], ["2026-09-28", [null, null, null, 1980, 34.4, 330, 340, 1310]],
+      ["2026-10-19", [0.29, 0.38, 47.5, 2240, 38.5, 365, 372, 1455]]].forEach(([date, vals]) => {
       const r = newPerfRow(date);
-      vals.forEach((v, k) => { r.vals[k] = v; });
+      vals.forEach((v, k) => { if (v != null) r.vals[pm[k].id] = v; });
       r.notes = NOTE;
       p.perf.rows.push(r);
     });
@@ -771,7 +781,8 @@
     const inj = dnum(player.profile.injuryDate), P = player.perf;
     const rows = P.rows.map((r, i) => ({ r, i, d: dnum(r.date), wk: weekOf(r.date, player.profile.injuryDate) }));
     const dated = rows.filter((x) => x.d != null).sort((a, b) => a.d - b.d || a.i - b.i);
-    const metrics = P.metrics.map((m, k) => {
+    const metrics = P.metrics.map((m) => {
+      const k = m.id;
       const pts = dated.filter((x) => isNum(x.r.vals[k]));
       const pre = inj == null ? [] : pts.filter((x) => x.d < inj);
       const post = inj == null ? pts : pts.filter((x) => x.d >= inj);
@@ -779,10 +790,10 @@
       const baseFrom = isNum(m.base) ? "entered" : pre.length ? pre[pre.length - 1].d : null;
       const last = post.length ? post[post.length - 1] : null, prev = post.length > 1 ? post[post.length - 2] : null;
       const latest = last ? last.r.vals[k] : null;
-      const best = post.length ? Math.max.apply(null, post.map((x) => x.r.vals[k])) : null;
+      const best = post.length ? (m.lower ? Math.min : Math.max).apply(null, post.map((x) => x.r.vals[k])) : null;
       const pctOf = (v) => (isNum(base) && base !== 0 && isNum(v) ? v / base : null);
       return {
-        k, name: m.name, inUse: !isSpare(m.name), base, baseFrom, latest, latestDate: last ? last.d : null,
+        k, id: m.id, test: m.test, name: m.name, lower: !!m.lower, label: m.test ? `${m.test} · ${m.name}` : m.name, inUse: true, base, baseFrom, latest, latestDate: last ? last.d : null,
         best, pct: pctOf(latest), bestPct: pctOf(best),
         delta: last && prev ? latest - prev.r.vals[k] : null,
         pctPoints: post.filter((x) => x.wk != null && x.wk >= 0).map((x) => [x.wk, pctOf(x.r.vals[k]), fmtDate(x.d)]).filter((p) => p[1] != null),
@@ -841,7 +852,7 @@
     regionTitle, blockTitle, isNum, isSpare, isGpsTest, isManual, uid,
     dnum, todayNum, todayIso, setToday, isoFromNum, fmtDate, weekOf,
     fmtInt, fmt1, fmtPct, fmtNum, fmtSigned,
-    newPlayer, newRegion, newBlockRow, newStatusRow, newSession, newGrowthRow, calcGrowth, newWellnessRow, calcWellness, WELLNESS, newPerfRow, calcPerf, PERF_SLOTS, normalizePlayer, examplePlayer,
+    newPlayer, newRegion, newBlockRow, newStatusRow, newSession, newGrowthRow, calcGrowth, newWellnessRow, calcWellness, WELLNESS, newPerfRow, newPerfMetric, calcPerf, normalizePlayer, examplePlayer,
     lsi, calcBlock, calcGps, calcRegion, calcStatus, calcPlayer, headline, maturity, lsiSeries, slotSeries,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Calc;

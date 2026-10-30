@@ -454,6 +454,20 @@ input[type=checkbox]:focus-visible { outline: 2px solid var(--blue-2); outline-o
 .sym-ch { display: flex; flex-direction: column; margin-left: 8px; line-height: 1.35; }
 
 /* performance testing */
-.perf-row { grid-template-columns: 18px 1fr 110px; }
+.perf-row { grid-template-columns: 1fr 110px auto 30px; }
+.perf-ed-h { font-weight: 800; color: var(--blue); margin: 10px 0 6px; text-transform: uppercase; font-size: 12px; letter-spacing: .05em; }
 .tbl tr.pre-row td { background: #F4F5F8; }
 .tbl tr.pre-row td.calc { background: #ECEEF3; }
+
+/* performance import: pick metrics */
+.pick-group { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+.pick-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.pick-h b { color: var(--blue); font-size: 14px; }
+.pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 10px; }
+.pick { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+.pick.on { background: var(--light); border-color: #C5D2EE; }
+.pick input { width: 20px; height: 20px; }
+.pick-n { flex: 1; font-size: 13px; font-weight: 600; }
+.pick-v { font-size: 12px; color: var(--mute); font-variant-numeric: tabular-nums; }
+.tbl th.perf-test-h { background: var(--blue); color: #fff; }
+.tbl .in.num.wide-num { width: 96px; }

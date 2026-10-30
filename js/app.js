@@ -654,49 +654,69 @@
   // performance testing (Hawkin CMJ, isometrics…) against pre-injury values
   function renderPerf(calc) {
     const p = player, P = p.perf, pc = calc.perf, inj = p.profile.injuryDate;
-    const used = pc.metrics.filter((m) => m.inUse || P.rows.some((r) => isNum(r.vals[m.k])));
+    const ms = pc.metrics;
     const editing = !!ui.editSlots.perf;
-    const pctCls = (v) => ratioClass(v, 1, 0.9);
+    const pctCls = (m, v) => (!isNum(v) ? "" : m.lower ? (v <= 1 ? "good" : v <= 1.1 ? "warn" : "bad") : ratioClass(v, 1, 0.9));
+    // metrics grouped by the test they came from, in the order they were added
+    const tests = [];
+    ms.forEach((m) => { let t = tests.find((x) => x.name === m.test); if (!t) tests.push((t = { name: m.test, ms: [] })); t.ms.push(m); });
+    // precision that suits the size of the number (0.3896 m, 55.16 W/kg, 4267.7 W)
+    const fmtV = (v) => {
+      if (!isNum(v)) return "";
+      const a = Math.abs(v), dp = a >= 1000 ? 1 : a >= 100 ? 1 : a >= 10 ? 2 : a >= 1 ? 3 : 4;
+      return C.fmtNum(Math.round(v * Math.pow(10, dp)) / Math.pow(10, dp));
+    };
+    const oneTest = new Set(ms.map((m) => m.test)).size === 1;
+    const lbl = (m) => (oneTest ? m.name : m.label);
+    const head = `<div class="card-head"><h2 class="ttl">Performance testing <span class="ttl-hint">— current vs pre-injury</span></h2>
+        <div class="row-actions">${ms.length ? btn("toggleSlots", editing ? "Done" : "Edit metrics", { data: { key: "perf" } }) : ""}${btn("importCsv", "Import Hawkin / CSV", { cls: ms.length ? "" : "primary", data: { target: "perf" } })}${ms.length ? btn("addPerf", "+ Add test date", { cls: "primary" }) : ""}</div></div>
+      ${ui.imp && ui.imp.target === "perf" ? renderImport() : ""}`;
+    if (!ms.length) {
+      return `<section class="card">${head}
+        <p class="fine">Import a Hawkin export (the .zip or CSV) to start. You choose which metrics to track, and they appear here named exactly as in the file, grouped by test. Include sessions from before the injury and they become the pre-injury values automatically.</p></section>`;
+    }
     const editor = editing ? `<div class="slot-ed">
-        <p class="fine">Name the metrics you test (rename a spare to add one; clear a name to retire it — data is kept). Pre-injury value: type it, or leave blank to use the last test dated before the injury.</p>
-        <div class="slot-grid">${P.metrics.map((m, k) => `<div class="slot-row perf-row"><span class="mute">${k + 1}</span>
-          ${inText(`perf.metrics.${k}.name`, C.isSpare(m.name) ? "" : m.name, { ph: C.SPARE, label: `Metric ${k + 1}` })}
-          ${inNum(`perf.metrics.${k}.base`, m.base, { ph: "pre-injury", label: `Metric ${k + 1} pre-injury value` })}</div>`).join("")}</div>
+        <p class="fine">Pre-injury value: type it, or leave blank to use the last test dated before the injury. Tick “lower is better” for timings. Remove a metric to stop tracking it (its values are deleted). To add metrics, import again and tick them.</p>
+        ${tests.map((t) => `<div class="perf-ed-h">${esc(t.name || "Tests")}</div><div class="slot-grid">${t.ms.map((m) => {
+          const i = P.metrics.findIndex((x) => x.id === m.id);
+          return `<div class="slot-row perf-row"><span class="b">${esc(m.name)}</span>
+            ${inNum(`perf.metrics.${i}.base`, P.metrics[i].base, { ph: "pre-injury", label: `${m.label} pre-injury value` })}
+            <label class="tick small">${inCheck(`perf.metrics.${i}.lower`, !!P.metrics[i].lower, { label: "Lower is better" })}<span>lower is better</span></label>
+            ${btn("removeMetric", "✕", { cls: "x", data: { id: m.id, name: m.label }, title: "Remove metric" })}</div>`;
+        }).join("")}</div>`).join("")}
       </div>` : "";
-    const summary = used.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Metric</th><th class="c">Pre-injury</th><th class="c">Latest</th><th class="c">Date</th><th class="c">% of pre-injury</th><th class="c">Δ prev</th><th class="c">Best since injury</th></tr></thead><tbody>
-      ${used.map((m) => `<tr><td class="b">${esc(m.name)}</td>
-        <td class="c">${esc(num(m.base))}${m.baseFrom != null && m.baseFrom !== "entered" ? ` <span class="thint">(${esc(C.fmtDate(m.baseFrom))})</span>` : ""}</td>
-        <td class="c b">${esc(num(m.latest))}</td><td class="c mute">${esc(C.fmtDate(m.latestDate))}</td>
-        <td class="c b ${pctCls(m.pct)}">${esc(C.fmtPct(m.pct))}</td>
-        <td class="c ${m.delta > 0 ? "up" : m.delta < 0 ? "down" : ""}">${m.delta == null ? "" : esc((m.delta > 0 ? "+" : "") + C.fmtNum(Math.round(m.delta * 100) / 100))}</td>
-        <td class="c">${esc(num(m.best))}${m.bestPct != null ? ` <span class="thint">(${esc(C.fmtPct(m.bestPct))})</span>` : ""}</td></tr>`).join("")}</tbody></table></div>` : `<p class="fine">No metrics set up — use “Edit metrics”.</p>`;
+    const summary = `<div class="scroll"><table class="tbl"><thead><tr><th>Metric</th><th class="c">Pre-injury</th><th class="c">Latest</th><th class="c">Date</th><th class="c">% of pre-injury</th><th class="c">Δ prev</th><th class="c">Best since injury</th></tr></thead><tbody>
+      ${tests.map((t) => `<tr class="band"><td colspan="7">${esc(t.name || "Tests")}</td></tr>${t.ms.map((m) => `<tr><td class="b">${esc(m.name)}${m.lower ? ` <span class="thint">(lower is better)</span>` : ""}</td>
+        <td class="c">${esc(fmtV(m.base))}${m.baseFrom != null && m.baseFrom !== "entered" ? ` <span class="thint">(${esc(C.fmtDate(m.baseFrom))})</span>` : ""}</td>
+        <td class="c b">${esc(fmtV(m.latest))}</td><td class="c mute">${esc(C.fmtDate(m.latestDate))}</td>
+        <td class="c b ${pctCls(m, m.pct)}">${esc(C.fmtPct(m.pct))}</td>
+        <td class="c ${m.delta == null || m.delta === 0 ? "" : (m.delta > 0) !== !!m.lower ? "up" : "down"}">${m.delta == null ? "" : esc((m.delta > 0 ? "+" : "") + fmtV(m.delta))}</td>
+        <td class="c">${esc(fmtV(m.best))}${m.bestPct != null ? ` <span class="thint">(${esc(C.fmtPct(m.bestPct))})</span>` : ""}</td></tr>`).join("")}`).join("")}</tbody></table></div>`;
     const rows = P.rows.map((r, i) => {
       const x = pc.rows[i], pre = x && x.wk != null && x.wk < 1;
-      return `<tr data-key="${esc(r.id)}" class="${pre ? "pre-row" : ""}"><td>${inDate(`perf.rows.${i}.date`, r.date, { label: "Test date" })}</td>
+      return `<tr data-key="${esc(r.id)}" class="${pre ? "pre-row" : ""}"><td class="sticky">${inDate(`perf.rows.${i}.date`, r.date, { label: "Test date" })}</td>
         <td class="calc c">${pre ? `<span class="thint">pre-injury</span>` : x && x.wk != null ? x.wk : ""}</td>
-        ${used.map((m) => `<td>${inNum(`perf.rows.${i}.vals.${m.k}`, r.vals[m.k], { label: m.name })}</td>`).join("")}
+        ${ms.map((m) => `<td>${inNum(`perf.rows.${i}.vals.${m.id}`, r.vals[m.id], { cls: "wide-num", label: m.label })}</td>`).join("")}
         <td>${inText(`perf.rows.${i}.notes`, r.notes, { cls: "notes", label: "Notes" })}</td>
         <td>${btn("delRow", "✕", { cls: "x", data: { path: "perf.rows", idx: i }, title: "Delete test date" })}</td></tr>`;
     }).join("");
-    const table = rows ? `<div class="scroll" data-scroll="perf"><table class="tbl entry"><thead><tr><th>Date</th><th class="c">Wk</th>${used.map((m) => `<th class="c slot-h">${esc(m.name)}</th>`).join("")}<th>Notes</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
-      : `<p class="fine">No tests logged yet. Add a test date, or import a Hawkin export — include tests from before the injury so the pre-injury values fill in automatically.</p>`;
-    const inUse = pc.metrics.filter((m) => m.inUse);
+    const table = rows ? `<div class="scroll" data-scroll="perf"><table class="tbl entry data"><thead>
+        <tr><th rowspan="2" class="sticky">Date</th><th rowspan="2" class="c">Wk</th>${tests.map((t) => `<th colspan="${t.ms.length}" class="c perf-test-h">${esc(t.name || "Tests")}</th>`).join("")}<th rowspan="2">Notes</th><th rowspan="2"></th></tr>
+        <tr>${tests.map((t) => t.ms.map((m) => `<th class="c slot-h">${esc(m.name)}</th>`).join("")).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`
+      : `<p class="fine">No test dates yet.</p>`;
     let k = p.settings.chartSlot.perf;
-    if (!isNum(k) || !inUse.some((m) => m.k === k)) k = inUse.length ? inUse[0].k : 0;
-    const sm = pc.metrics[k];
-    const selMetric = inUse.length ? inSel("settings.chartSlot.perf", k, inUse.map((m) => ({ v: m.k, t: m.name })), { kind: "selnum", cls: "chart-sel", label: "Metric to chart" }) : "";
+    if (!ms.some((m) => m.id === k)) k = ms[0].id;
+    const sm = ms.find((m) => m.id === k);
+    const selMetric = inSel("settings.chartSlot.perf", k, tests.map((t) => ({ group: t.name || "Tests", items: t.ms.map((m) => ({ v: m.id, t: m.name })) })), { cls: "chart-sel", label: "Metric to chart" });
     const charts = `<div class="charts">
-        ${chart({ title: "% of pre-injury by rehab week", kind: "pct", target: 1, targetLabel: "pre-injury (100%)", series: inUse.map((m) => ({ name: m.name, points: m.pctPoints })).filter((x) => x.points.length), empty: inj ? "Needs a pre-injury value and a test during rehab" : "Set the injury date on the Dashboard" })}
-        ${inUse.length ? chart({ titleHtml: selMetric, title: sm.name, kind: "dec", target: isNum(sm.base) ? sm.base : null, targetLabel: isNum(sm.base) ? `pre-injury ${C.fmtNum(sm.base)}` : "", series: [{ name: sm.name, points: sm.rawPoints }], empty: "No tests during rehab for this metric yet" }) : ""}
+        ${chart({ title: "% of pre-injury by rehab week", kind: "pct", target: 1, targetLabel: "pre-injury (100%)", series: ms.map((m) => ({ name: lbl(m), points: m.pctPoints })).filter((x) => x.points.length), empty: inj ? "Needs a pre-injury value and a test during rehab" : "Set the injury date on the Dashboard" })}
+        ${chart({ titleHtml: selMetric, title: lbl(sm), kind: "dec", target: isNum(sm.base) ? sm.base : null, targetLabel: isNum(sm.base) ? `pre-injury ${fmtV(sm.base)}` : "", series: [{ name: lbl(sm), points: sm.rawPoints }], fmtTip: fmtV, empty: "No tests during rehab for this metric yet" })}
       </div>`;
-    return `<section class="card">
-      <div class="card-head"><h2 class="ttl">Performance testing <span class="ttl-hint">— current vs pre-injury</span></h2>
-        <div class="row-actions">${btn("toggleSlots", editing ? "Done" : "Edit metrics", { data: { key: "perf" } })}${btn("importCsv", "Import CSV (Hawkin)", { data: { target: "perf" } })}${btn("addPerf", "+ Add test date", { cls: "primary" })}</div></div>
-      ${ui.imp && ui.imp.target === "perf" ? renderImport() : ""}${editor}
+    return `<section class="card">${head}${editor}
       ${summary}
       ${charts}
       <h3 class="sub-ttl">Test log</h3>${table}
-      <p class="fine">% of pre-injury: 100%+ green · 90–99% amber · below 90% red. Rows dated before the injury are the pre-injury tests.</p>
+      <p class="fine">Values and names as exported (Hawkin heights in metres). % of pre-injury: 100%+ green · 90–99% amber · below 90% red (reversed for “lower is better”). Rows dated before the injury are the pre-injury tests.</p>
     </section>`;
   }
 
@@ -922,7 +942,7 @@
   function importTarget() {
     const t = ui.imp.target;
     if (t === "gps") return { gps: true };
-    if (t === "perf") return { perf: true, slots: player.perf.metrics.map((m, k) => ({ k, name: m.name })).filter((m) => !C.isSpare(m.name)) };
+    if (t === "perf") return { perf: true };
     const [region, block] = t.split("|");
     const blk = player.regions[region].blocks[block];
     return { region, block, blk, slots: blk.slots.map((s, k) => ({ k, name: s.name, bilateral: !!s.bilateral })).filter((s) => !C.isSpare(s.name)) };
@@ -942,10 +962,13 @@
       imp.combine = false;
       imp.alterg = false;
     } else if (T.perf) {
-      const g = X.guessGpsMap(P.headers);
-      imp.map = { date: g.date, player: g.player, notes: g.notes };
-      imp.slots = X.guessPerfMap(P.headers, P.rows, T.slots).slots;
+      const g = X.guessGpsMap(P.headers), t = X.guessTestCols(P.headers);
+      imp.map = { date: g.date, player: g.player };
+      imp.testCol = t.testCol;
+      imp.tagCol = t.tagCol;
       imp.agg = "best";
+      imp.pick = {};
+      imp.showAll = {};
     } else {
       const g = X.guessGpsMap(P.headers);
       imp.map = { date: g.date, player: g.player, notes: g.notes };
@@ -962,8 +985,36 @@
       imp.playerVal = names.find((n) => n.toLowerCase() === me) || names.find((n) => me && me.split(/\s+/).every((w) => n.toLowerCase().indexOf(w) >= 0)) || "";
     }
   }
+  const normName = (s) => String(s || "").trim().toLowerCase();
+  const findPerfMetric = (test, name) => player.perf.metrics.find((m) => normName(m.test) === normName(test) && normName(m.name) === normName(name));
+  // performance import: trials grouped by test, every numeric column offered as a metric; ticked ones become one value per day
+  function buildPerf() {
+    const imp = ui.imp, P = imp.P;
+    const res = X.perfGroups(P, { dateCol: imp.map.date, playerCol: imp.map.player, playerVal: imp.playerVal, testCol: imp.testCol, tagCol: imp.tagCol, dateOrder: imp.dateOrder });
+    const picked = [], by = {};
+    res.groups.forEach((G) => {
+      G.slug = G.label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      G.cols.forEach((c) => { c.pk = `${G.slug}_${c.i}`; c.tracked = !!findPerfMetric(G.label, c.name); });
+      // first import of a test: key metrics pre-ticked; afterwards: just the ones already being tracked
+      const known = G.cols.some((c) => c.tracked);
+      G.cols.forEach((c) => {
+        if (imp.pick[c.pk] === undefined) imp.pick[c.pk] = known ? c.tracked : c.key;
+        if (!imp.pick[c.pk]) return;
+        picked.push({ G, c });
+        const lists = {};
+        G.rows.forEach((x) => { const v = String(x.r[c.i] || "").trim(); if (v !== "" && isFinite(Number(v))) (lists[x.date] = lists[x.date] || []).push(Number(v)); });
+        Object.keys(lists).forEach((d) => {
+          const L = lists[d];
+          const v = imp.agg === "avg" ? L.reduce((a, b) => a + b, 0) / L.length : c.lower ? Math.min(...L) : Math.max(...L);
+          (by[d] = by[d] || { date: d, vals: {} }).vals[c.pk] = Math.round(v * 10000) / 10000;
+        });
+      });
+    });
+    return { groups: res.groups, picked, rows: Object.values(by).sort((a, b) => (a.date < b.date ? -1 : 1)), skip: res.skipped };
+  }
   function buildImport() {
     const imp = ui.imp, P = imp.P, T = importTarget(), mp = imp.map;
+    if (T.perf) return buildPerf();
     const out = [], skip = { date: 0, player: 0, dup: 0, empty: 0, excluded: 0 };
     const exCol = X.excludedCol(P.headers);
     const cell = (r, i) => (i == null || i === "" ? "" : r[i]);
@@ -979,16 +1030,6 @@
         if (isNum(s.top) && imp.speedUnit === "kmh") s.top = Math.round((s.top / 3.6) * 100) / 100;
         if (C.GPS_METRICS.every((m) => s[m.key] == null)) { skip.empty++; return; }
         out.push(s);
-      } else if (T.perf) {
-        const v = {};
-        T.slots.forEach((sl) => {
-          const c = imp.slots[sl.k] || {};
-          if (c.typeCol != null && c.typeCol !== "" && c.type && !X.filterMatch(cell(r, c.typeCol), c.type)) return;
-          const n = numAt(r, c.col);
-          if (n != null) v[sl.k] = Math.round(n * (Number(c.scale) || 1) * 1000) / 1000;
-        });
-        if (!Object.keys(v).length) { skip.empty++; return; }
-        out.push({ date, vals: v, notes: cell(r, mp.notes) });
       } else {
         const v = {};
         T.slots.forEach((sl) => { const c = imp.slots[sl.k] || {}; v[sl.k] = [numAt(r, c.l), sl.bilateral ? null : numAt(r, c.r)]; });
@@ -1009,22 +1050,6 @@
         if (s.title && g.title.indexOf(s.title) < 0) g.title = g.title ? g.title + " + " + s.title : s.title;
       });
       rows = Object.values(by).sort((a, b) => (a.date < b.date ? -1 : 1));
-    }
-    if (T.perf) {
-      // one row per day: several trials -> best (highest) or average
-      const by = {};
-      out.forEach((r) => {
-        const g = by[r.date] || (by[r.date] = { date: r.date, lists: {}, notes: r.notes });
-        Object.keys(r.vals).forEach((k) => { (g.lists[k] = g.lists[k] || []).push(r.vals[k]); });
-      });
-      rows = Object.values(by).sort((a, b) => (a.date < b.date ? -1 : 1)).map((g) => {
-        const vals = {};
-        Object.keys(g.lists).forEach((k) => {
-          const L = g.lists[k];
-          vals[k] = imp.agg === "avg" ? Math.round((L.reduce((a, b) => a + b, 0) / L.length) * 1000) / 1000 : Math.max.apply(null, L);
-        });
-        return { date: g.date, vals, notes: g.notes, trials: Math.max(...Object.values(g.lists).map((L) => L.length)) };
-      });
     }
     if (T.gps) {
       rows = rows.filter((s) => {
@@ -1052,31 +1077,22 @@
     }
     let mapping;
     if (T.perf) {
-      const valOpts = (c) => (c == null || c === "" ? [] : Array.from(new Set(P.rows.map((r) => r[c]).filter(Boolean))).sort());
-      // how many of this player's rows give each metric a value (0 = check that metric's settings)
-      const counts = {};
-      P.rows.forEach((r) => {
-        if (imp.map.player != null && imp.playerVal && r[imp.map.player] !== imp.playerVal) return;
-        T.slots.forEach((sl) => {
-          const c = imp.slots[sl.k] || {};
-          if (c.col == null || c.col === "") return;
-          if (c.typeCol != null && c.typeCol !== "" && c.type && !X.filterMatch(r[c.typeCol], c.type)) return;
-          if (X.toNumber(r[c.col], P.delimiter) != null) counts[sl.k] = (counts[sl.k] || 0) + 1;
-        });
-      });
+      const B = buildPerf();
+      const hdrOpts = [{ v: "", t: "— none —" }].concat(P.headers.map((h, i) => ({ v: i, t: h })));
       mapping = `<div class="imp-grid">
           <label class="field"><span>Date *</span>${sel("@ui.imp.map.date", imp.map.date, "Date column")}</label>
           <label class="field"><span>Player name</span>${sel("@ui.imp.map.player", imp.map.player, "Player column")}</label>
+          <label class="field"><span>Test name column</span>${inSel("@ui.imp.testCol", imp.testCol, hdrOpts, { kind: "selnum", label: "Test column" })}</label>
+          <label class="field"><span>Isometric tests named by</span>${inSel("@ui.imp.tagCol", imp.tagCol, hdrOpts, { kind: "selnum", label: "Tag column" })}</label>
           <label class="field"><span>Several trials on one day</span>${inSel("@ui.imp.agg", imp.agg, [{ v: "best", t: "Keep the best" }, { v: "avg", t: "Average them" }])}</label></div>
-        <div class="scroll"><table class="tbl entry imp-slots"><thead><tr><th>Metric</th><th>Value column</th><th>Only rows where…</th><th>…contains</th><th>Units</th><th class="c">Rows</th></tr></thead><tbody>
-        ${T.slots.map((sl) => {
-          const c = imp.slots[sl.k] || {}, b = `@ui.imp.slots.${sl.k}`;
-          return `<tr><td class="b">${esc(sl.name)}</td><td>${sel(`${b}.col`, c.col, `${sl.name} column`)}</td>
-            <td>${inSel(`${b}.typeCol`, c.typeCol, [{ v: "", t: "— any row —" }].concat(P.headers.map((h, i) => ({ v: i, t: h }))), { kind: "selnum", label: `${sl.name} filter column` })}</td>
-            <td>${c.typeCol == null || c.typeCol === "" ? `<span class="mute">—</span>` : `<input class="in" type="text" list="impvals${sl.k}" data-bind="${b}.type" data-kind="text" value="${esc(c.type || "")}" placeholder="e.g. squat" aria-label="${esc(sl.name)} filter words" autocomplete="off"><datalist id="impvals${sl.k}">${valOpts(c.typeCol).map((v) => `<option value="${esc(v)}">`).join("")}</datalist>`}</td>
-            <td>${inSel(`${b}.scale`, String(c.scale || 1), [{ v: "1", t: "as exported" }, { v: "100", t: "m → cm (×100)" }], { label: `${sl.name} units` })}</td>
-            <td class="c ${c.col == null || c.col === "" ? "mute" : counts[sl.k] ? "" : "warn"}">${c.col == null || c.col === "" ? "not in file" : counts[sl.k] || 0}</td></tr>`;
-        }).join("")}</tbody></table></div>`;
+        ${B.groups.map((G) => {
+          const all = !!imp.showAll[G.slug];
+          const shown = all ? G.cols : G.cols.filter((c) => imp.pick[c.pk] || c.key || c.tracked);
+          const nPick = G.cols.filter((c) => imp.pick[c.pk]).length;
+          return `<div class="pick-group"><div class="pick-h"><b>${esc(G.label)}</b><span class="thint">${G.trials} trial${G.trials === 1 ? "" : "s"} on ${G.days} day${G.days === 1 ? "" : "s"} · ${nPick} of ${G.cols.length} metrics ticked</span>
+              ${btn("perfShowAll", all ? "Show fewer" : `Show all ${G.cols.length} metrics`, { cls: "link small", data: { slug: G.slug } })}</div>
+            <div class="pick-grid">${shown.map((c) => `<label class="pick${imp.pick[c.pk] ? " on" : ""}">${inCheck(`@ui.imp.pick.${c.pk}`, !!imp.pick[c.pk], { label: c.name })}<span class="pick-n">${esc(c.name)}</span><span class="pick-v">${c.example == null ? "" : esc(C.fmtNum(Math.round(c.example * 1000) / 1000))}</span></label>`).join("")}</div></div>`;
+        }).join("") || `<p class="fine">No tests found for these settings.</p>`}`;
     } else if (T.gps) {
       mapping = `<div class="imp-grid">${X.GPS_FIELDS.map((f) => `<label class="field"><span>${esc(f.label)}${f.required ? " *" : ""}</span>${sel(`@ui.imp.map.${f.key}`, imp.map[f.key], f.label)}</label>`).join("")}
         <label class="field"><span>Top speed units</span>${inSel("@ui.imp.speedUnit", imp.speedUnit, [{ v: "ms", t: "m/s" }, { v: "kmh", t: "km/h (convert to m/s)" }])}</label></div>
@@ -1103,15 +1119,20 @@
       const sample = res.rows.slice(0, 6);
       preview = T.gps
         ? `<table class="tbl"><thead><tr><th>Date</th><th>Title</th>${C.GPS_METRICS.map((m) => `<th class="c">${esc(m.label)}</th>`).join("")}</tr></thead><tbody>${sample.map((s) => `<tr><td>${esc(C.fmtDate(s.date, true))}</td><td>${esc(s.title)}</td>${C.GPS_METRICS.map((m) => `<td class="c">${esc(num(s[m.key]))}</td>`).join("")}</tr>`).join("")}</tbody></table>`
-        : T.perf ? `<table class="tbl"><thead><tr><th>Date</th>${T.slots.map((sl) => `<th class="c">${esc(sl.name)}</th>`).join("")}</tr></thead><tbody>${sample.map((r) => `<tr><td>${esc(C.fmtDate(r.date, true))}</td>${T.slots.map((sl) => `<td class="c">${esc(num(r.vals[sl.k]))}</td>`).join("")}</tr>`).join("")}</tbody></table>`
+        : T.perf ? ""
         : `<table class="tbl"><thead><tr><th>Date</th>${T.slots.map((sl) => `<th class="c">${esc(sl.name)}</th>`).join("")}</tr></thead><tbody>${sample.map((r) => `<tr><td>${esc(C.fmtDate(r.date, true))}</td>${T.slots.map((sl) => `<td class="c">${esc([num(r.vals[sl.k][0]), num(r.vals[sl.k][1])].filter(Boolean).join(" / "))}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
     }
     const what = T.gps ? (imp.alterg ? "Alter-G session" : "session") : "test date";
+    if (T.perf && res.rows.length) {
+      const B = res, dates = B.rows.slice(-6);
+      preview = `<table class="tbl"><thead><tr><th>Metric</th>${dates.map((r) => `<th class="c">${esc(C.fmtDate(r.date))}</th>`).join("")}</tr></thead><tbody>${B.picked.map(({ G, c }) =>
+        `<tr><td><span class="thint">${esc(G.label)} ·</span> <b>${esc(c.name)}</b></td>${dates.map((r) => `<td class="c">${r.vals[c.pk] == null ? "" : esc(C.fmtNum(r.vals[c.pk]))}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    }
     return `<div class="imp-panel"><h3 class="sub-ttl">Import ${T.gps ? "GPS sessions" : T.perf ? "performance tests" : "test results"} from CSV</h3>${head}
-      <p class="fine">Check the columns below — they're matched automatically from the headings. ${T.gps ? "Distances in metres; speeds converted to m/s." : T.perf ? "Hawkin exports list each trial on its own row and say which test it was in the Test Type or Tags column: “Only rows where … contains” picks out that test (e.g. Tags contains “hip add”). “Rows” shows how many trials each metric found; amber 0 means check that line. Tests dated before the injury become the pre-injury values. A date that's already logged is filled in, not duplicated." : "Rows for a date that's already in the table fill in that row rather than adding a new one."}</p>
+      <p class="fine">Check the columns below — they're matched automatically from the headings. ${T.gps ? "Distances in metres; speeds converted to m/s." : T.perf ? "Every metric in the file is listed under its test, named exactly as exported; tick the ones to track (key ones are pre-ticked, and anything already tracked stays ticked). Each day keeps the best trial (lowest for timings). Tests dated before the injury become the pre-injury values; dates already logged are filled in, not duplicated." : "Rows for a date that's already in the table fill in that row rather than adding a new one."}</p>
       <div class="imp-grid top">${dates}${who}</div>
       ${mapping}
-      <div class="imp-sum ${ok && res.rows.length ? "" : "warn-box"}">${!ok ? "Pick the date column to continue." : res.rows.length ? `<b>${res.rows.length} ${what}${res.rows.length === 1 ? "" : "s"}</b> ready to import` : "Nothing to import with these settings"}${skipped ? ` · skipped ${esc(skipped)}` : ""}</div>
+      <div class="imp-sum ${ok && res.rows.length ? "" : "warn-box"}">${!ok ? "Pick the date column to continue." : res.rows.length ? `<b>${res.rows.length} ${what}${res.rows.length === 1 ? "" : "s"}</b>${T.perf ? ` × <b>${res.picked.length} metric${res.picked.length === 1 ? "" : "s"}</b>` : ""} ready to import` : T.perf ? "Tick at least one metric to import" : "Nothing to import with these settings"}${skipped ? ` · skipped ${esc(skipped)}` : ""}</div>
       ${preview ? `<div class="scroll">${preview}</div>${res.rows.length > 6 ? `<p class="fine">…and ${res.rows.length - 6} more</p>` : ""}` : ""}
       <div class="row-actions">${btn("cancelImport", "Cancel")}${res.rows.length ? btn("doImport", `Import ${res.rows.length} ${what}${res.rows.length === 1 ? "" : "s"}`, { cls: "primary" }) : ""}</div>
     </div>`;
@@ -1136,10 +1157,16 @@
       });
       sortByDate(player.gps.sessions);
     } else if (T.perf) {
+      const idFor = {};
+      res.picked.forEach(({ G, c }) => {
+        let m = findPerfMetric(G.label, c.name);
+        if (!m) { m = C.newPerfMetric(G.label, c.name, c.lower); player.perf.metrics.push(m); }
+        idFor[c.pk] = m.id;
+      });
       res.rows.forEach((r) => {
         let row = player.perf.rows.find((x) => x.date === r.date);
-        if (row) merged++; else { row = C.newPerfRow(r.date); row.notes = r.notes || "Imported from CSV"; player.perf.rows.push(row); added++; }
-        Object.keys(r.vals).forEach((k) => { row.vals[k] = r.vals[k]; });
+        if (row) merged++; else { row = C.newPerfRow(r.date); row.notes = imp.fileName ? "Imported: " + imp.fileName.split(" (")[0] : "Imported"; player.perf.rows.push(row); added++; }
+        Object.keys(r.vals).forEach((pk) => { row.vals[idFor[pk]] = r.vals[pk]; });
       });
       sortByDate(player.perf.rows);
     } else {
@@ -1375,6 +1402,14 @@
       log.push(C.newStatusRow(C.todayIso(), prev));
       touch(); renderNow();
       focusLast(`[data-scroll="status"] tbody tr:last-child input[type=date]`);
+    },
+    perfShowAll(d) { if (ui.imp) { ui.imp.showAll[d.slug] = !ui.imp.showAll[d.slug]; renderNow(); } },
+    removeMetric(d) {
+      confirmModal(`Stop tracking ${d.name}?`, "The metric and all its values are removed from this player. You can import it again later.", "Delete", () => {
+        player.perf.metrics = player.perf.metrics.filter((m) => m.id !== d.id);
+        player.perf.rows.forEach((r) => { delete r.vals[d.id]; });
+        touch(); renderNow();
+      });
     },
     addPerf() {
       player.perf.rows.push(C.newPerfRow(C.todayIso()));
