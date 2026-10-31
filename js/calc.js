@@ -655,6 +655,27 @@
     return e.focus + (parts.length ? " + " + parts.join(" + ") : "");
   }
 
+  // Squad board colour for an availability: red = unavailable, amber = modified, green = full training / available
+  function availGroup(text) {
+    const t = str(text).toLowerCase();
+    if (!t.trim()) return "";
+    if (t.indexOf("unavailable") >= 0) return "red";
+    if (t.indexOf("modified") >= 0 || t.indexOf("partial") >= 0) return "amber";
+    if (t.indexOf("full training") >= 0 || t.indexOf("available") >= 0) return "green";
+    return "";
+  }
+  // within green: return to training first, then available for selection
+  const availStage = (text) => (/available for selection/i.test(str(text)) ? 2 : availGroup(text) === "green" ? 1 : 0);
+
+  // the current colour group, when this spell in it began, and when the current green spell (return to training) began
+  function boardStatus(sorted) {
+    if (!sorted.length) return { group: "", groupSince: null, rttDate: null, stage: 0 };
+    const last = sorted[sorted.length - 1].e, group = availGroup(last.avail);
+    let j = sorted.length - 1;
+    while (j > 0 && availGroup(sorted[j - 1].e.avail) === group) j--;
+    return { group, groupSince: sorted[j].d, rttDate: group === "green" ? sorted[j].d : null, stage: availStage(last.avail) };
+  }
+
   function calcStatus(player, gps) {
     const inj = player.profile.injuryDate;
     const log = player.statusLog.map((e, i) => ({ e, i, d: dnum(e.date) })).filter((x) => x.d != null);
@@ -697,6 +718,7 @@
       baseFocus, baseSince, baseSinceWk: wkOf(baseSince),
       gpsWeekText: nog ? "" : "Latest logged GPS week: wk " + gps.latestWeek,
       chips, history,
+      ...boardStatus(sorted),
     };
   }
 
@@ -853,7 +875,7 @@
     dnum, todayNum, todayIso, setToday, isoFromNum, fmtDate, weekOf,
     fmtInt, fmt1, fmtPct, fmtNum, fmtSigned,
     newPlayer, newRegion, newBlockRow, newStatusRow, newSession, newGrowthRow, calcGrowth, newWellnessRow, calcWellness, WELLNESS, newPerfRow, newPerfMetric, calcPerf, normalizePlayer, examplePlayer,
-    lsi, calcBlock, calcGps, calcRegion, calcStatus, calcPlayer, headline, maturity, lsiSeries, slotSeries,
+    availGroup, lsi, calcBlock, calcGps, calcRegion, calcStatus, calcPlayer, headline, maturity, lsiSeries, slotSeries,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Calc;
   else root.Calc = Calc;

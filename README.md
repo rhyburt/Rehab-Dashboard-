@@ -33,6 +33,18 @@ At the bottom of the Athlete Profile tab, **Import Hawkin / CSV** reads a Hawkin
 
 In any test block, **Edit tests → Record pain (NRS)** adds a 0–10 symptom-response column to that test only. Scores are colour-coded (0–2 green, 3–5 amber, 6+ red), and the latest one appears as a small badge in the Dashboard's latest-tests list.
 
+## Squad overview (Players page)
+
+The Players page groups every active player by their **latest Status Log entry**:
+
+- 🔴 **Unavailable**: unavailable for training and fixtures
+- 🟠 **Modified training**: modified / partial training
+- 🟢 **Return to training**: full training (not yet available for fixtures), then available for selection
+
+Within each group, the most advanced players come first: available for selection before full training, then the most phases cleared, then the longest in rehab. Each card shows the week of rehab, how long the player has been in that colour, their phases and the expected RTP. Add a new Status Log entry and the player moves group automatically.
+
+**Back in training: first 12 weeks**, at the bottom, lists every green player with a progress bar counted from the first day of their current green spell. After 12 weeks they show "12 weeks complete" with an Archive button.
+
 ## Archiving players
 
 When a player has returned to play, use **Archive** on their card (or **Archive player** at the bottom of their Dashboard). Archived players drop out of the main list but keep all their data. **Show archived players** lists them, and **Restore** puts them back, e.g. after a re-injury.

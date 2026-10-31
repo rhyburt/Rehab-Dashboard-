@@ -28,6 +28,13 @@
       localStorage.removeItem(KEY_PLAYER + id);
       store.setIndex(store.getIndex().filter((e) => e.id !== id));
     },
+    // recompute index entries saved by older versions (they lack the board fields)
+    refreshIndex() {
+      const idx = store.getIndex();
+      if (!idx.some((e) => !("group" in e))) return;
+      idx.forEach((e) => { const p = store.load(e.id); if (p) Object.assign(e, indexEntry(p)); });
+      store.setIndex(idx);
+    },
     getLists() {
       const d = C.DEFAULT_LISTS;
       try {
@@ -44,7 +51,8 @@
     return {
       id: p.id, name: p.profile.name, position: p.profile.position, injury: p.profile.injury, injuryDate: p.profile.injuryDate,
       availability: c.status.latest ? c.status.availability : "",
-      regions: c.ticked.map((r) => ({ r, phase: c.regions[r].currentPhase, cleared: c.regions[r].clearedText })),
+      regions: c.ticked.map((r) => ({ r, phase: c.regions[r].currentPhase, cleared: c.regions[r].clearedText, n: c.regions[r].clearedCount })),
+      group: c.status.group, groupSince: c.status.groupSince, rttDate: c.status.rttDate, stage: c.status.stage, rtpDate: p.profile.rtpDate,
       archivedOn: p.archivedOn || "",
       updated: p.updated,
     };
@@ -303,7 +311,7 @@
     }
     return `<header class="toolbar">${BRAND}<span class="spacer"></span>
       <a class="btn ghost" href="#/settings">Settings</a></header>
-      <main class="page narrow">${renderLibrary()}</main>${FOOT}`;
+      <main class="page board-page">${renderLibrary()}</main>${FOOT}`;
   }
 
   function renderTab() {
@@ -322,6 +330,9 @@
   function renderLibrary() {
     const idx = store.getIndex();
     const today = C.todayNum();
+    const wks = (d) => (d == null ? null : Math.floor((today - d) / 7));
+    const dur = (d) => { const w = wks(d); return w == null ? "" : w < 1 ? `${today - d} day${today - d === 1 ? "" : "s"}` : `${w} wk${w === 1 ? "" : "s"}`; };
+    const GROUP_NAME = { red: "unavailable", amber: "modified", green: "in full training" };
     const card = (e) => {
       const inj = C.dnum(e.injuryDate);
       const wk = inj == null ? null : Math.floor((today - inj) / 7) + 1;
@@ -329,12 +340,15 @@
       const regs = (e.regions || []).map((r) => `<span class="pill">${esc(C.regionTitle(r.r))} · ${esc(r.phase)} <em>${esc(r.cleared)}</em></span>`).join("");
       const arch = !!e.archivedOn;
       const data = { id: e.id, name: e.name || "Unnamed player" };
-      return `<article class="pcard${arch ? " archived" : ""}" data-key="${esc(e.id)}">
+      const rtp = C.dnum(e.rtpDate);
+      const facts = arch ? [`Archived ${C.fmtDate(e.archivedOn, true)}`, inj == null ? "" : `injured ${C.fmtDate(e.injuryDate, true)}`]
+        : [inj == null ? "No injury date" : `Week ${wk} of rehab`, e.group && e.groupSince != null ? `${GROUP_NAME[e.group]} for ${dur(e.groupSince)}` : "",
+          rtp == null ? "" : rtp >= today ? `RTP ${C.fmtDate(e.rtpDate)}` : `RTP ${C.fmtDate(e.rtpDate)} (passed)`];
+      return `<article class="pcard${arch ? " archived" : ""} g-${e.group || "none"}" data-key="${esc(e.id)}">
         <a class="pcard-main" href="#/p/${encodeURIComponent(e.id)}/dashboard">
           <div class="pname">${esc(e.name || "Unnamed player")}</div>
           ${meta ? `<div class="pmeta">${meta}</div>` : ""}
-          <div class="pmeta">${arch ? `Archived ${esc(C.fmtDate(e.archivedOn, true))}${inj == null ? "" : ` · injured ${esc(C.fmtDate(e.injuryDate, true))}`}`
-            : inj == null ? "No injury date" : `Injured ${esc(C.fmtDate(e.injuryDate, true))} · week ${wk} of rehab`}</div>
+          <div class="pmeta">${facts.filter(Boolean).map(esc).join(" · ")}</div>
           ${arch ? "" : `<div class="pfoot">${e.availability ? `<span class="badge ${availClass(e.availability)}">${esc(e.availability)}</span>` : `<span class="badge">No status yet</span>`}${regs}</div>`}
         </a>
         <div class="pcard-acts">
@@ -344,7 +358,43 @@
       </article>`;
     };
     const active = idx.filter((e) => !e.archivedOn), archived = idx.filter((e) => e.archivedOn);
-    const cards = active.map(card).join("");
+    // most advanced first: furthest stage (available > return to training), most phases cleared, then longest in rehab
+    const progress = (e) => Math.max(0, ...(e.regions || []).map((r) => r.n || 0));
+    const order = (a, b) => (b.stage || 0) - (a.stage || 0) || progress(b) - progress(a) ||
+      (C.dnum(a.injuryDate) || 1e9) - (C.dnum(b.injuryDate) || 1e9) || String(a.name).localeCompare(String(b.name));
+    const GROUPS = [["red", "Unavailable", "Unavailable for training and fixtures"], ["amber", "Modified training", "Modified / partial training"],
+      ["green", "Return to training", "Full training, then available for selection"], ["", "Status not set", "No Status Log entry yet"]];
+    const sections = active.length ? GROUPS.map(([g, title, sub]) => {
+      const list = active.filter((e) => (e.group || "") === g).sort(order);
+      if (!g && !list.length) return "";
+      let body = list.map(card).join("");
+      if (g === "green" && list.length) {
+        // two stages, in sequence
+        const rtt = list.filter((e) => e.stage !== 2), avail = list.filter((e) => e.stage === 2);
+        body = (avail.length ? `<div class="stage-h">Available for selection</div>${avail.map(card).join("")}` : "") +
+          (rtt.length ? `<div class="stage-h">Full training — not yet available for fixtures</div>${rtt.map(card).join("")}` : "");
+      }
+      return `<section class="grp grp-${g || "none"}"><div class="grp-h"><span class="grp-dot"></span><h3>${esc(title)}</h3><span class="grp-n">${list.length}</span><span class="grp-sub">${esc(sub)}</span></div>
+        <div class="plist">${body || `<p class="grp-empty">No players</p>`}</div></section>`;
+    }).join("") : `<div class="empty"><div class="empty-ico">＋</div><h2>${archived.length ? "No players in rehab" : "No players yet"}</h2><p>${archived.length ? "Everyone is archived. Add a new player when someone gets injured." : "Add a player, or load the worked example from the spreadsheet to see how everything fits together."}</p></div>`;
+    // back in training: every green player, counted from the first day of their current green spell
+    const back = active.filter((e) => e.group === "green" && e.rttDate != null).sort((a, b) => b.rttDate - a.rttDate);
+    const backHtml = back.length ? `<section class="back12">
+        <div class="grp-h"><h3>Back in training — first 12 weeks</h3><span class="grp-n">${back.length}</span><span class="grp-sub">from the first day in green on the Status Log</span></div>
+        ${back.map((e) => {
+          const days = today - e.rttDate, w = Math.floor(days / 7), done = days >= 84;
+          const pct = Math.min(100, Math.round((days / 84) * 100));
+          const data = { id: e.id, name: e.name || "Unnamed player" };
+          return `<div class="b12${done ? " done" : ""}" data-key="${esc(e.id)}">
+            <a class="b12-name" href="#/p/${encodeURIComponent(e.id)}/dashboard">${esc(e.name || "Unnamed player")}</a>
+            <span class="b12-since">since ${esc(C.fmtDate(e.rttDate))}</span>
+            <span class="b12-bar" title="${pct}% of 12 weeks"><i class="w${Math.round(pct / 5) * 5}"></i></span>
+            <span class="b12-wk">${done ? "12 weeks complete" : w < 1 ? `${days} day${days === 1 ? "" : "s"}` : `wk ${w} of 12`}</span>
+            ${done ? btn("archivePlayer", "Archive", { cls: "small", data }) : `<span class="b12-stage">${e.stage === 2 ? "Available" : "Full training"}</span>`}
+          </div>`;
+        }).join("")}
+      </section>` : "";
+    const cards = sections + backHtml;
     const archivedHtml = archived.length ? `<div class="arch-head">${btn("toggleArchived", `${ui.showArchived ? "Hide" : "Show"} archived players (${archived.length})`, { cls: "link" })}</div>
       ${ui.showArchived ? `<div class="plist">${archived.map(card).join("")}</div>` : ""}` : "";
     return `<section class="hero">
@@ -352,10 +402,9 @@
           <h1>Rehab <span>Dashboard</span></h1>
           <span class="hero-tag">Marching on Together · Est. 1919</span></div>
       </section>
-      <div class="lib-head"><h2 class="sec-h">Players</h2><p class="sub">Saved privately on this device. Nothing is uploaded or shared.</p></div>
+      <div class="lib-head"><h2 class="sec-h">Squad overview</h2><p class="sub">Grouped by the latest Status Log entry · saved privately on this device</p></div>
       ${btn("newPlayer", "+ New player", { cls: "primary big" })}
-      <div class="plist">${cards || (archived.length ? `<div class="empty"><h2>No players in rehab</h2><p>Everyone is archived. Add a new player when someone gets injured.</p></div>`
-        : `<div class="empty"><div class="empty-ico">＋</div><h2>No players yet</h2><p>Add a player, or load the worked example from the spreadsheet to see how everything fits together.</p></div>`)}</div>
+      <div class="board">${cards}</div>
       ${archivedHtml}
       <div class="lib-tools">
         ${btn("loadExample", "Load example player")}
@@ -1620,6 +1669,7 @@
   // ================================================================== boot
   try { localStorage.setItem("rehabdash_probe", "1"); localStorage.removeItem("rehabdash_probe"); }
   catch (e) { document.getElementById("storageWarn").hidden = false; }
+  try { store.refreshIndex(); } catch (e) { /* keep going with the stored index */ }
   onRoute();
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
     window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js").catch(() => {}); });
